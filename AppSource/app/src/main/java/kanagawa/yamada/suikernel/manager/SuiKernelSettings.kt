@@ -21,6 +21,7 @@ import kanagawa.yamada.suikernel.manager.ui.theme.*
 fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
     var anyaThermal by remember { mutableStateOf(true) }
     var yamadaBoost by remember { mutableStateOf(true) }
+    var performanceMode by remember { mutableStateOf("Balanced") }
 
     Column(
         modifier = Modifier
@@ -117,10 +118,12 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 
                 // Balanced Button
                 Button(
-                    onClick = { /* TODO */ },
+                    onClick = { performanceMode = "Balanced" },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00ACC1))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (performanceMode == "Balanced") Color(0xFF00ACC1) else Color(0xFF1C2830)
+                    )
                 ) {
                     Text(
                         text = "Balanced",
@@ -135,10 +138,12 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 
                 // Gaming Button
                 Button(
-                    onClick = { /* TODO */ },
+                    onClick = { performanceMode = "Gaming" },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1C2830))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (performanceMode == "Gaming") Color(0xFFE05A67) else Color(0xFF1C2830)
+                    )
                 ) {
                     Text(
                         text = "Gaming",
