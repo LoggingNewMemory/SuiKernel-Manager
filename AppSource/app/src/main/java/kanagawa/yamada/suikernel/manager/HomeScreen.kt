@@ -33,6 +33,19 @@ fun DashboardScreen() {
     var wallpaperBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     val scrollState = rememberScrollState()
 
+    val appVersion = remember {
+        try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "Unknown"
+        } catch (e: Exception) {
+            "Unknown"
+        }
+    }
+
+    val kernelVersion = remember {
+        val fullVersion = System.getProperty("os.version") ?: "Unknown"
+        fullVersion.split("-")[0]
+    }
+
     LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var isLoaded = false
@@ -162,7 +175,7 @@ fun DashboardScreen() {
                             color = TextPrimary
                         )
                         Text(
-                            text = "1.0",
+                            text = appVersion,
                             fontFamily = SFCompactRounded,
                             fontSize = 32.sp,
                             color = TextPrimary,
@@ -202,7 +215,7 @@ fun DashboardScreen() {
                             color = TextPrimary
                         )
                         Text(
-                            text = "5.10.259",
+                            text = kernelVersion,
                             fontFamily = GoogleSansFlex,
                             fontWeight = FontWeight.Normal,
                             fontSize = 18.sp,
