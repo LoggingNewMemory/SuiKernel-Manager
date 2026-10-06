@@ -314,7 +314,10 @@ fun DashboardScreen() {
 
         // Big Cyan Button
         Button(
-            onClick = { },
+            onClick = {
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://youtu.be/a51VH9BYzZA"))
+                context.startActivity(intent)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
