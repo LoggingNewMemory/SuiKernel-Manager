@@ -55,27 +55,50 @@ fun DashboardScreen() {
     val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) {
-        try {
-            val wallpaperManager = WallpaperManager.getInstance(context)
-            val drawable = wallpaperManager.drawable
-            if (drawable != null) {
-                if (drawable is BitmapDrawable) {
-                    wallpaperBitmap = drawable.bitmap.asImageBitmap()
-                } else {
-                    val bitmap = Bitmap.createBitmap(
-                        if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 1080,
-                        if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 1920,
-                        Bitmap.Config.ARGB_8888
-                    )
-                    val canvas = android.graphics.Canvas(bitmap)
-                    drawable.setBounds(0, 0, canvas.width, canvas.height)
-                    drawable.draw(canvas)
-                    wallpaperBitmap = bitmap.asImageBitmap()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            var isLoaded = false
+            try {
+                // Since this app is a root app, fetch wallpaper directly from system to bypass permissions
+                val cacheFile = java.io.File(context.cacheDir, "root_wallpaper")
+                val cmd = "cp /data/system/users/0/wallpaper ${cacheFile.absolutePath} && chmod 644 ${cacheFile.absolutePath}"
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                process.waitFor()
+                
+                if (cacheFile.exists() && cacheFile.length() > 0) {
+                    val bitmap = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
+                    if (bitmap != null) {
+                        wallpaperBitmap = bitmap.asImageBitmap()
+                        isLoaded = true
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            if (!isLoaded) {
+                try {
+                    val wallpaperManager = WallpaperManager.getInstance(context)
+                    val drawable = wallpaperManager.drawable
+                    if (drawable != null) {
+                        if (drawable is BitmapDrawable) {
+                            wallpaperBitmap = drawable.bitmap.asImageBitmap()
+                        } else {
+                            val bitmap = Bitmap.createBitmap(
+                                if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 1080,
+                                if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 1920,
+                                Bitmap.Config.ARGB_8888
+                            )
+                            val canvas = android.graphics.Canvas(bitmap)
+                            drawable.setBounds(0, 0, canvas.width, canvas.height)
+                            drawable.draw(canvas)
+                            wallpaperBitmap = bitmap.asImageBitmap()
+                        }
+                    }
+                } catch (e: SecurityException) {
+                    e.printStackTrace()
+                    // Requires READ_EXTERNAL_STORAGE permission
                 }
             }
-        } catch (e: SecurityException) {
-            e.printStackTrace()
-            // Requires READ_EXTERNAL_STORAGE permission
         }
     }
 
@@ -96,14 +119,38 @@ fun DashboardScreen() {
             fontSize = 24.sp,
             color = TextPrimary
         )
-        Text(
-            text = "By: Kanagawa Yamada",
-            fontFamily = GoogleSansFlex,
-            fontWeight = FontWeight.Light,
-            fontSize = 14.sp,
-            color = TextPrimary,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
-        )
+        ) {
+            Text(
+                text = "By: Kanagawa Yamada",
+                fontFamily = GoogleSansFlex,
+                fontWeight = FontWeight.Light,
+                fontSize = 14.sp,
+                color = TextPrimary
+            )
+            
+            Spacer(modifier = Modifier.width(8.dp))
+            
+            val isRooted = remember { checkRootAccess() }
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = if (isRooted) Color(0xFF4CAF50) else Color(0xFFE53935),
+                        shape = RoundedCornerShape(50)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (isRooted) "Root Granted" else "No Root",
+                    fontFamily = GoogleSansFlex,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
 
         Row(
             modifier = Modifier
@@ -202,16 +249,30 @@ fun DashboardScreen() {
                     .weight(1f)
                     .fillMaxHeight(),
                 shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
             ) {
-                if (wallpaperBitmap != null) {
-                    Image(
-                        bitmap = wallpaperBitmap!!,
-                        contentDescription = "User Wallpaper",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF3B4045)))
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(6.dp)
+                ) {
+                    if (wallpaperBitmap != null) {
+                        Image(
+                            bitmap = wallpaperBitmap!!,
+                            contentDescription = "User Wallpaper",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF3B4045))
+                        )
+                    }
                 }
             }
         }
@@ -318,5 +379,17 @@ fun DashboardScreen() {
         }
         
         Spacer(modifier = Modifier.height(32.dp)) // Extra space at bottom for scrolling comfortably
+    }
+}
+
+fun checkRootAccess(): Boolean {
+    return try {
+        val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+        val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+        val output = reader.readLine()
+        process.waitFor()
+        output?.contains("uid=0(root)") == true || process.exitValue() == 0
+    } catch (e: Exception) {
+        false
     }
 }
