@@ -171,7 +171,7 @@ fun DashboardScreen() {
                         .fillMaxWidth()
                         .weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardDark)
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF373F45))
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp)
@@ -211,7 +211,7 @@ fun DashboardScreen() {
                         .fillMaxWidth()
                         .weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardDark)
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1C2830))
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp)
@@ -249,7 +249,7 @@ fun DashboardScreen() {
                     .weight(1f)
                     .fillMaxHeight(),
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = CardDark)
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF34404A))
             ) {
                 Box(
                     modifier = Modifier
