@@ -41,10 +41,26 @@ fun DashboardScreen() {
         }
     }
 
-    val kernelVersion = remember {
-        val fullVersion = System.getProperty("os.version") ?: "Unknown"
-        fullVersion.split("-")[0]
+    val kernelInfo = remember {
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/version"))
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+            val output = reader.readLine()
+            process.waitFor()
+
+            val realKernelString = output?.split(" ")?.getOrNull(2) ?: ""
+            val isSuiKernel = realKernelString.contains("SuiKernel", ignoreCase = true)
+            val isKsuNext = realKernelString.contains("KernelSU-Next", ignoreCase = true)
+            
+            val versionPrefix = if (realKernelString.isNotEmpty()) realKernelString.split("-")[0] else "Unknown"
+            Pair(versionPrefix, isSuiKernel && isKsuNext)
+        } catch (e: Exception) {
+            Pair("Unknown", false)
+        }
     }
+    
+    val kernelVersion = kernelInfo.first
+    val isOfficial = kernelInfo.second
 
     LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -125,17 +141,16 @@ fun DashboardScreen() {
             
             Spacer(modifier = Modifier.width(8.dp))
             
-            val isRooted = remember { checkRootAccess() }
             Box(
                 modifier = Modifier
                     .background(
-                        color = if (isRooted) Color(0xFF4CAF50) else Color(0xFFE53935),
+                        color = if (isOfficial) Color(0xFF4CAF50) else Color(0xFFE05A67),
                         shape = RoundedCornerShape(50)
                     )
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = if (isRooted) "Root Granted" else "No Root",
+                    text = if (isOfficial) "OFFICIAL" else "REJECTED",
                     fontFamily = GoogleSansFlex,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
