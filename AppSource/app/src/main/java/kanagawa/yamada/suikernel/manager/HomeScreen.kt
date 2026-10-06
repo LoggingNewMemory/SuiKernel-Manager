@@ -325,7 +325,12 @@ fun DashboardScreen() {
                         color = TextPrimary
                     )
                 }
-                Text(text = ">", fontSize = 20.sp, color = TextSecondary)
+                Icon(
+                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
+                    contentDescription = "Right Arrow",
+                    tint = TextSecondary,
+                    modifier = Modifier.height(16.dp)
+                )
             }
         }
 
@@ -366,7 +371,12 @@ fun DashboardScreen() {
                         color = TextPrimary
                     )
                 }
-                Text(text = ">", fontSize = 20.sp, color = TextSecondary)
+                Icon(
+                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
+                    contentDescription = "Right Arrow",
+                    tint = TextSecondary,
+                    modifier = Modifier.height(16.dp)
+                )
             }
         }
         
