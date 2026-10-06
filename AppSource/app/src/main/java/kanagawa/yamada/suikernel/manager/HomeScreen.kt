@@ -62,6 +62,30 @@ fun DashboardScreen() {
     val kernelVersion = kernelInfo.first
     val isOfficial = kernelInfo.second
 
+    val deviceName = remember {
+        var vendorModel = ""
+        try {
+            val process = Runtime.getRuntime().exec("getprop ro.product.vendor.model")
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+            vendorModel = reader.readLine() ?: ""
+            process.waitFor()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        if (vendorModel.isNotBlank()) {
+            vendorModel
+        } else {
+            val manufacturer = android.os.Build.MANUFACTURER
+            val model = android.os.Build.MODEL
+            if (model.lowercase().startsWith(manufacturer.lowercase())) {
+                model.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+            } else {
+                manufacturer.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() } + " " + model
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var isLoaded = false
@@ -240,11 +264,13 @@ fun DashboardScreen() {
                         )
                         Spacer(modifier = Modifier.weight(1f))
                         Text(
-                            text = "TECNO LH8n",
+                            text = deviceName,
                             fontFamily = GoogleSansFlex,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
