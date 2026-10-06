@@ -14,6 +14,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import kanagawa.yamada.suikernel.manager.ui.theme.*
 
 @Composable
@@ -77,25 +78,78 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             }
         }
         
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         
-        // Anya Melfissa Thermal
-        SettingToggleItem(
-            title = "Anya Melfissa Thermal",
-            subtitle = "Enable / Disable Anya Thermal Kernel Side",
-            checked = anyaThermal,
-            onCheckedChange = { anyaThermal = it }
-        )
+        // Anya Melfissa Thermal Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = CardDark)
+        ) {
+            SettingToggleItem(
+                title = "Anya Melfissa Thermal",
+                subtitle = "Enable / Disable Anya Thermal Kernel Side",
+                checked = anyaThermal,
+                onCheckedChange = { anyaThermal = it },
+                modifier = Modifier.padding(16.dp)
+            )
+        }
         
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         
-        // Yamada Gaming Boost
-        SettingToggleItem(
-            title = "Yamada Gaming Boost",
-            subtitle = "Enable / Disable Yamada Gaming Boost",
-            checked = yamadaBoost,
-            onCheckedChange = { yamadaBoost = it }
-        )
+        // Yamada Touch Boost Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = CardDark)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                SettingToggleItem(
+                    title = "Yamada Touch Boost",
+                    subtitle = "Enable / Disable Yamada Gaming Boost",
+                    checked = yamadaBoost,
+                    onCheckedChange = { yamadaBoost = it }
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = Color.White, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Balanced Button
+                Button(
+                    onClick = { /* TODO */ },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00ACC1))
+                ) {
+                    Text(
+                        text = "Balanced",
+                        fontFamily = GoogleSansFlex,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Gaming Button
+                Button(
+                    onClick = { /* TODO */ },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1C2830))
+                ) {
+                    Text(
+                        text = "Gaming",
+                        fontFamily = GoogleSansFlex,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -104,10 +158,11 @@ fun SettingToggleItem(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -115,7 +170,7 @@ fun SettingToggleItem(
                 text = title,
                 fontFamily = GoogleSansFlex,
                 fontWeight = FontWeight.Medium,
-                fontSize = 22.sp,
+                fontSize = 18.sp,
                 color = Color.White
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -123,7 +178,7 @@ fun SettingToggleItem(
                 text = subtitle,
                 fontFamily = GoogleSansFlex,
                 fontWeight = FontWeight.Normal,
-                fontSize = 14.sp,
+                fontSize = 12.sp,
                 color = Color.White
             )
         }
