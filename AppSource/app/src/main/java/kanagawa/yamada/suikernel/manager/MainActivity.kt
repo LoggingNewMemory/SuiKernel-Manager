@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.*
 import androidx.core.view.WindowCompat
 import kanagawa.yamada.suikernel.manager.ui.theme.SuiKernelManagerTheme
 
@@ -20,7 +21,12 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    DashboardScreen()
+                    var currentScreen by remember { mutableStateOf("Dashboard") }
+                    
+                    when (currentScreen) {
+                        "Dashboard" -> DashboardScreen(onNavigateToSettings = { currentScreen = "Settings" })
+                        "Settings" -> SuiKernelSettingsScreen(onNavigateBack = { currentScreen = "Dashboard" })
+                    }
                 }
             }
         }

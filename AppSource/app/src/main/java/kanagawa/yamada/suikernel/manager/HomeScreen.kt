@@ -3,6 +3,7 @@ package kanagawa.yamada.suikernel.manager
 import android.app.WallpaperManager
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -28,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import kanagawa.yamada.suikernel.manager.ui.theme.*
 
 @Composable
-fun DashboardScreen() {
+fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
     val context = LocalContext.current
     var wallpaperBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     val scrollState = rememberScrollState()
@@ -382,7 +383,9 @@ fun DashboardScreen() {
 
         // SuiKernel Settings
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onNavigateToSettings() },
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = CardDark)
         ) {
