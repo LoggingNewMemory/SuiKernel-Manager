@@ -25,3 +25,6 @@ gradle-app.setting
 
 # Log Files
 *.log
+
+# KernelSU-Next Local Clone
+KernelSU-Next/
