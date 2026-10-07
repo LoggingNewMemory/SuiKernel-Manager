@@ -54,7 +54,8 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
             val isKsuNext = realKernelString.contains("KernelSU-Next", ignoreCase = true)
             
             val versionPrefix = if (realKernelString.isNotEmpty()) realKernelString.split("-")[0] else "Unknown"
-            Pair(versionPrefix, isSuiKernel && isKsuNext)
+            val hasRoot = checkRootAccess()
+            Pair(versionPrefix, isSuiKernel && isKsuNext && hasRoot)
         } catch (e: Exception) {
             Pair("Unknown", false)
         }
