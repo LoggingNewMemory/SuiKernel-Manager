@@ -106,7 +106,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
         ) {
             SettingToggleItem(
                 title = "Anya Melfissa Thermal",
-                subtitle = "Enable / Disable Anya Thermal Kernel Side",
+                subtitle = "Spoof temperature to 30 ish",
                 checked = anyaThermal,
                 onCheckedChange = { 
                     anyaThermal = it
@@ -128,7 +128,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             Column(modifier = Modifier.padding(16.dp)) {
                 SettingToggleItem(
                     title = "Yamada Touch Boost",
-                    subtitle = "Schedutil Direct Hook for Touch Input",
+                    subtitle = "Boosts CPU freq to max on touch",
                     checked = yamadaBoost,
                     onCheckedChange = { 
                         yamadaBoost = it 
@@ -210,8 +210,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             colors = CardDefaults.cardColors(containerColor = CardDark)
         ) {
             SettingToggleItem(
-                title = "Ochinai Inaho Audio",
-                subtitle = "SCHED_FIFO boost & PM QoS for high-res audio",
+                title = "Ochinai Inaho",
+                subtitle = "Boost Audio Priority + PM QoS tuning",
                 checked = inahoAudio,
                 onCheckedChange = { 
                     inahoAudio = it
@@ -232,7 +232,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
         ) {
             SettingToggleItem(
                 title = "Tenebrion",
-                subtitle = "Screen state based CPU frequency throttler",
+                subtitle = "Drops CPU freq to min on screen off",
                 checked = tenebrion,
                 onCheckedChange = { 
                     tenebrion = it
@@ -253,7 +253,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
         ) {
             SettingToggleItem(
                 title = "Airani Iofifteen",
-                subtitle = "Maximum CPUSet Tweaks via Raco API",
+                subtitle = "Tweaks CPU Set",
                 checked = airaniCpuset,
                 onCheckedChange = { 
                     airaniCpuset = it
@@ -274,7 +274,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
         ) {
             SettingToggleItem(
                 title = "Sandevistan Boot",
-                subtitle = "min=max frequency lock for fast booting",
+                subtitle = "Temporary performance boost during boot",
                 checked = sandevistan,
                 onCheckedChange = { 
                     sandevistan = it
@@ -296,7 +296,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             Column(modifier = Modifier.padding(16.dp)) {
                 SettingToggleItem(
                     title = "Sparxie Swappiness Tuner",
-                    subtitle = "Actively override vm_swappiness (Current: ${sparxieSwap.toInt()})",
+                    subtitle = "Adjust swappiness value (Current: ${sparxieSwap.toInt()})",
                     checked = sparxieEnabled,
                     onCheckedChange = { 
                         sparxieEnabled = it
