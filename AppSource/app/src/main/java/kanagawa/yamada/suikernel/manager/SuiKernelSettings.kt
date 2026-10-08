@@ -18,10 +18,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import kanagawa.yamada.suikernel.manager.ui.theme.*
 
 @Composable
 fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
+    BackHandler(onBack = onNavigateBack)
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPrefs = context.getSharedPreferences("SuiKernelPrefs", android.content.Context.MODE_PRIVATE)
 
