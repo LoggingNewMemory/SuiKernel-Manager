@@ -112,7 +112,20 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
             if (!isLoaded) {
                 try {
                     val wallpaperManager = WallpaperManager.getInstance(context)
-                    val drawable = wallpaperManager.drawable
+                    var drawable = try {
+                        wallpaperManager.drawable
+                    } catch (e: SecurityException) {
+                        null
+                    }
+
+                    if (drawable == null) {
+                        try {
+                            drawable = wallpaperManager.builtInDrawable
+                        } catch (e: Exception) {
+                            // Ignore
+                        }
+                    }
+
                     if (drawable != null) {
                         if (drawable is BitmapDrawable) {
                             wallpaperBitmap = drawable.bitmap.asImageBitmap()
@@ -128,9 +141,8 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
                             wallpaperBitmap = bitmap.asImageBitmap()
                         }
                     }
-                } catch (e: SecurityException) {
+                } catch (e: Exception) {
                     e.printStackTrace()
-                    // Requires READ_EXTERNAL_STORAGE permission
                 }
             }
         }
