@@ -27,12 +27,37 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kanagawa.yamada.suikernel.manager.ui.theme.*
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+
+object WallpaperCache {
+    val bitmap = mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    var isLoaded = false
+}
 
 @Composable
 fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
     val context = LocalContext.current
-    var wallpaperBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    val wallpaperBitmap by WallpaperCache.bitmap
+    var fetchTrigger by remember { mutableStateOf(0) }
     val scrollState = rememberScrollState()
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_WALLPAPER_CHANGED) {
+                    WallpaperCache.isLoaded = false
+                    fetchTrigger++
+                }
+            }
+        }
+        context.registerReceiver(receiver, IntentFilter(Intent.ACTION_WALLPAPER_CHANGED))
+        onDispose {
+            context.unregisterReceiver(receiver)
+        }
+    }
 
     val appVersion = remember {
         try {
@@ -88,9 +113,11 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(fetchTrigger) {
+        if (WallpaperCache.isLoaded) return@LaunchedEffect
+
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            var isLoaded = false
+            var localIsLoaded = false
             try {
                 // Since this app is a root app, fetch wallpaper directly from system to bypass permissions
                 val cacheFile = java.io.File(context.cacheDir, "root_wallpaper")
@@ -101,15 +128,15 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
                 if (cacheFile.exists() && cacheFile.length() > 0) {
                     val bitmap = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
                     if (bitmap != null) {
-                        wallpaperBitmap = bitmap.asImageBitmap()
-                        isLoaded = true
+                        WallpaperCache.bitmap.value = bitmap.asImageBitmap()
+                        localIsLoaded = true
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
 
-            if (!isLoaded) {
+            if (!localIsLoaded) {
                 try {
                     val wallpaperManager = WallpaperManager.getInstance(context)
                     var drawable = try {
@@ -128,7 +155,8 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
 
                     if (drawable != null) {
                         if (drawable is BitmapDrawable) {
-                            wallpaperBitmap = drawable.bitmap.asImageBitmap()
+                            WallpaperCache.bitmap.value = drawable.bitmap.asImageBitmap()
+                            localIsLoaded = true
                         } else {
                             val bitmap = Bitmap.createBitmap(
                                 if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 1080,
@@ -138,12 +166,17 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
                             val canvas = android.graphics.Canvas(bitmap)
                             drawable.setBounds(0, 0, canvas.width, canvas.height)
                             drawable.draw(canvas)
-                            wallpaperBitmap = bitmap.asImageBitmap()
+                            WallpaperCache.bitmap.value = bitmap.asImageBitmap()
+                            localIsLoaded = true
                         }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
+            }
+            
+            if (localIsLoaded) {
+                WallpaperCache.isLoaded = true
             }
         }
     }
