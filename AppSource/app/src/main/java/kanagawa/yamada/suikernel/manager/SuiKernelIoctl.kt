@@ -53,10 +53,10 @@ object SuiKernelIoctl {
 
         val sparxieEnabled = sharedPrefs.getBoolean("sparxieEnabled", true)
         if (sparxieEnabled) {
-            val sparxieSwap = sharedPrefs.getFloat("sparxieSwap", 60f)
+            val sparxieSwap = sharedPrefs.getFloat("sparxieSwap", 60f).coerceIn(10f, 100f)
             sendIoctl(CMD_SPARXIE_SWAP, sparxieSwap.toLong())
         } else {
-            sendIoctl(CMD_SPARXIE_SWAP, 100L)
+            sendIoctl(CMD_SPARXIE_SWAP, 60L)
         }
     }
 }
