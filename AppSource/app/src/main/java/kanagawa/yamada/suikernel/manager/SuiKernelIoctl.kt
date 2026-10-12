@@ -1,5 +1,17 @@
 package kanagawa.yamada.suikernel.manager
 
+data class SuiKernelConfig(
+    val anyaThermal: Boolean = true,
+    val yamadaBoost: Boolean = true,
+    val performanceMode: String = "Balanced",
+    val inahoAudio: Boolean = true,
+    val tenebrion: Boolean = true,
+    val airaniCpuset: Boolean = true,
+    val sandevistan: Boolean = false,
+    val sparxieEnabled: Boolean = true,
+    val sparxieSwap: Float = 60f
+)
+
 object SuiKernelIoctl {
     init {
         try {
@@ -21,70 +33,93 @@ object SuiKernelIoctl {
     const val CMD_AIRANI_CPUSET = 0x2FC6501BL
     const val CMD_SANDEVISTAN = 0x27B55B18L
 
-    fun applyAllSettings(context: android.content.Context) {
-        val sharedPrefs = context.getSharedPreferences("SuiKernelPrefs", android.content.Context.MODE_PRIVATE)
-
-        val anyaThermal = sharedPrefs.getBoolean("anyaThermal", true)
-        sendIoctl(CMD_ANYA_THERMAL, if (anyaThermal) 1L else 0L)
-
-        val yamadaBoost = sharedPrefs.getBoolean("yamadaBoost", true)
-        if (yamadaBoost) {
-            val performanceMode = sharedPrefs.getString("performanceMode", "Balanced")
-            if (performanceMode == "Gaming") {
-                sendIoctl(CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
-            } else {
-                sendIoctl(CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
+    fun readStorage(): SuiKernelConfig {
+        val map = mutableMapOf<String, String>()
+        try {
+            val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            process.inputStream.bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    val parts = line.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        map[parts[0].trim()] = parts[1].trim()
+                    }
+                }
             }
-        } else {
-            sendIoctl(CMD_YAMADA_TOUCH_BOOST_DISABLE, 1L)
+            process.waitFor()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
-        val inahoAudio = sharedPrefs.getBoolean("inahoAudio", true)
-        sendIoctl(CMD_INAHO_AUDIO, if (inahoAudio) 1L else 0L)
+        val touchBoost = map["touch_boost"]
+        val yamadaBoost = touchBoost != "0"
+        val performanceMode = if (touchBoost == "2") "Gaming" else "Balanced"
 
-        val tenebrion = sharedPrefs.getBoolean("tenebrion", true)
-        sendIoctl(CMD_TENEBRION, if (tenebrion) 1L else 0L)
-
-        val airaniCpuset = sharedPrefs.getBoolean("airaniCpuset", true)
-        sendIoctl(CMD_AIRANI_CPUSET, if (airaniCpuset) 1L else 0L)
-
-        val sandevistan = sharedPrefs.getBoolean("sandevistan", false)
-        sendIoctl(CMD_SANDEVISTAN, if (sandevistan) 1L else 0L)
-
-        val sparxieEnabled = sharedPrefs.getBoolean("sparxieEnabled", true)
-        if (sparxieEnabled) {
-            val sparxieSwap = sharedPrefs.getFloat("sparxieSwap", 60f).coerceIn(10f, 100f)
-            sendIoctl(CMD_SPARXIE_SWAP, sparxieSwap.toLong())
-        } else {
-            sendIoctl(CMD_SPARXIE_SWAP, 60L)
-        }
-
-        syncStorage(context)
+        return SuiKernelConfig(
+            anyaThermal = map["anya_thermal"] != "0",
+            yamadaBoost = yamadaBoost,
+            performanceMode = performanceMode,
+            inahoAudio = map["inaho"] != "0",
+            tenebrion = map["tenebrion"] != "0",
+            airaniCpuset = map["airani"] != "0",
+            sandevistan = map["sandevistan"] == "1",
+            sparxieEnabled = map["sparxie"] != "0",
+            sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: 60f
+        )
     }
 
-    fun syncStorage(context: android.content.Context) {
+    fun syncStorage(config: SuiKernelConfig) {
         Thread {
             try {
-                val sharedPrefs = context.getSharedPreferences("SuiKernelPrefs", android.content.Context.MODE_PRIVATE)
-                val airani = sharedPrefs.getBoolean("airaniCpuset", true)
-                val sandevistan = sharedPrefs.getBoolean("sandevistan", false)
-                val sparxieEnabled = sharedPrefs.getBoolean("sparxieEnabled", true)
-                val sparxieSwap = sharedPrefs.getFloat("sparxieSwap", 60f).coerceIn(10f, 100f)
-
-                val airaniVal = if (airani) "1" else "0"
-                val sandevistanVal = if (sandevistan) "1" else "0"
-                val swappinessVal = if (sparxieEnabled) sparxieSwap.toInt() else 60
+                val anyaVal = if (config.anyaThermal) "1" else "0"
+                val touchBoostVal = if (!config.yamadaBoost) "0" else if (config.performanceMode == "Gaming") "2" else "1"
+                val inahoVal = if (config.inahoAudio) "1" else "0"
+                val tenebrionVal = if (config.tenebrion) "1" else "0"
+                val airaniVal = if (config.airaniCpuset) "1" else "0"
+                val sandevistanVal = if (config.sandevistan) "1" else "0"
+                val sparxieVal = if (config.sparxieEnabled) "1" else "0"
+                val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt() else 60
 
                 val cmd = "mkdir -p /data/SuiKernel && " +
                         "echo -n $airaniVal > /data/SuiKernel/airani && " +
                         "echo -n $sandevistanVal > /data/SuiKernel/sandevistan && " +
+                        "echo -n $sparxieVal > /data/SuiKernel/sparxie && " +
                         "echo -n $swappinessVal > /data/SuiKernel/swappiness && " +
+                        "echo -n $inahoVal > /data/SuiKernel/inaho && " +
+                        "echo -n $touchBoostVal > /data/SuiKernel/touch_boost && " +
+                        "echo -n $tenebrionVal > /data/SuiKernel/tenebrion && " +
+                        "echo -n $anyaVal > /data/SuiKernel/anya_thermal && " +
                         "chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/*"
 
                 val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
                 process.waitFor()
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }.start()
+    }
+
+    fun applyAllSettings(context: android.content.Context? = null) {
+        Thread {
+            val config = readStorage()
+            sendIoctl(CMD_ANYA_THERMAL, if (config.anyaThermal) 1L else 0L)
+            if (config.yamadaBoost) {
+                if (config.performanceMode == "Gaming") {
+                    sendIoctl(CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
+                } else {
+                    sendIoctl(CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
+                }
+            } else {
+                sendIoctl(CMD_YAMADA_TOUCH_BOOST_DISABLE, 1L)
+            }
+            sendIoctl(CMD_INAHO_AUDIO, if (config.inahoAudio) 1L else 0L)
+            sendIoctl(CMD_TENEBRION, if (config.tenebrion) 1L else 0L)
+            sendIoctl(CMD_AIRANI_CPUSET, if (config.airaniCpuset) 1L else 0L)
+            sendIoctl(CMD_SANDEVISTAN, if (config.sandevistan) 1L else 0L)
+            if (config.sparxieEnabled) {
+                sendIoctl(CMD_SPARXIE_SWAP, config.sparxieSwap.toLong())
+            } else {
+                sendIoctl(CMD_SPARXIE_SWAP, 60L)
             }
         }.start()
     }

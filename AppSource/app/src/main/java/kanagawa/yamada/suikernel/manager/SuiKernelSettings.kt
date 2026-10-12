@@ -19,28 +19,58 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.activity.compose.BackHandler
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kanagawa.yamada.suikernel.manager.ui.theme.*
 
 @Composable
 fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
     BackHandler(onBack = onNavigateBack)
     val context = androidx.compose.ui.platform.LocalContext.current
-    val sharedPrefs = context.getSharedPreferences("SuiKernelPrefs", android.content.Context.MODE_PRIVATE)
 
     fun showRebootToast() {
         android.widget.Toast.makeText(context, "Please Reboot", android.widget.Toast.LENGTH_SHORT).show()
     }
 
-    var anyaThermal by remember { mutableStateOf(sharedPrefs.getBoolean("anyaThermal", true)) }
-    var yamadaBoost by remember { mutableStateOf(sharedPrefs.getBoolean("yamadaBoost", true)) }
-    var performanceMode by remember { mutableStateOf(sharedPrefs.getString("performanceMode", "Balanced") ?: "Balanced") }
+    var anyaThermal by remember { mutableStateOf(true) }
+    var yamadaBoost by remember { mutableStateOf(true) }
+    var performanceMode by remember { mutableStateOf("Balanced") }
     
-    var inahoAudio by remember { mutableStateOf(sharedPrefs.getBoolean("inahoAudio", true)) }
-    var tenebrion by remember { mutableStateOf(sharedPrefs.getBoolean("tenebrion", true)) }
-    var airaniCpuset by remember { mutableStateOf(sharedPrefs.getBoolean("airaniCpuset", true)) }
-    var sandevistan by remember { mutableStateOf(sharedPrefs.getBoolean("sandevistan", false)) }
-    var sparxieSwap by remember { mutableStateOf(sharedPrefs.getFloat("sparxieSwap", 60f).coerceIn(10f, 100f)) }
-    var sparxieEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("sparxieEnabled", true)) }
+    var inahoAudio by remember { mutableStateOf(true) }
+    var tenebrion by remember { mutableStateOf(true) }
+    var airaniCpuset by remember { mutableStateOf(true) }
+    var sandevistan by remember { mutableStateOf(false) }
+    var sparxieSwap by remember { mutableStateOf(60f) }
+    var sparxieEnabled by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val config = SuiKernelIoctl.readStorage()
+            withContext(Dispatchers.Main) {
+                anyaThermal = config.anyaThermal
+                yamadaBoost = config.yamadaBoost
+                performanceMode = config.performanceMode
+                inahoAudio = config.inahoAudio
+                tenebrion = config.tenebrion
+                airaniCpuset = config.airaniCpuset
+                sandevistan = config.sandevistan
+                sparxieEnabled = config.sparxieEnabled
+                sparxieSwap = config.sparxieSwap
+            }
+        }
+    }
+
+    fun currentConfig() = SuiKernelConfig(
+        anyaThermal = anyaThermal,
+        yamadaBoost = yamadaBoost,
+        performanceMode = performanceMode,
+        inahoAudio = inahoAudio,
+        tenebrion = tenebrion,
+        airaniCpuset = airaniCpuset,
+        sandevistan = sandevistan,
+        sparxieEnabled = sparxieEnabled,
+        sparxieSwap = sparxieSwap
+    )
 
     val scrollState = rememberScrollState()
     Column(
@@ -67,7 +97,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 
                 Spacer(modifier = Modifier.width(16.dp))
                 
-                Divider(
+                VerticalDivider(
                     color = Color.White,
                     modifier = Modifier
                         .height(48.dp)
@@ -114,8 +144,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 checked = anyaThermal,
                 onCheckedChange = { 
                     anyaThermal = it
-                    sharedPrefs.edit().putBoolean("anyaThermal", it).apply()
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_ANYA_THERMAL, if (it) 1L else 0L)
+                    SuiKernelIoctl.syncStorage(currentConfig().copy(anyaThermal = it))
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -136,7 +166,6 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     checked = yamadaBoost,
                     onCheckedChange = { 
                         yamadaBoost = it 
-                        sharedPrefs.edit().putBoolean("yamadaBoost", it).apply()
                         if (it) {
                             if (performanceMode == "Gaming") {
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
@@ -146,6 +175,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                         } else {
                             SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_DISABLE, 1L)
                         }
+                        SuiKernelIoctl.syncStorage(currentConfig().copy(yamadaBoost = it))
                     }
                 )
                 
@@ -159,8 +189,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                         Button(
                             onClick = { 
                                 performanceMode = "Balanced" 
-                                sharedPrefs.edit().putString("performanceMode", "Balanced").apply()
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
+                                SuiKernelIoctl.syncStorage(currentConfig().copy(performanceMode = "Balanced"))
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
                             shape = RoundedCornerShape(8.dp),
@@ -183,8 +213,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                         Button(
                             onClick = { 
                                 performanceMode = "Gaming" 
-                                sharedPrefs.edit().putString("performanceMode", "Gaming").apply()
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
+                                SuiKernelIoctl.syncStorage(currentConfig().copy(performanceMode = "Gaming"))
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
                             shape = RoundedCornerShape(8.dp),
@@ -219,8 +249,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 checked = inahoAudio,
                 onCheckedChange = { 
                     inahoAudio = it
-                    sharedPrefs.edit().putBoolean("inahoAudio", it).apply()
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_INAHO_AUDIO, if (it) 1L else 0L)
+                    SuiKernelIoctl.syncStorage(currentConfig().copy(inahoAudio = it))
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -240,8 +270,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 checked = tenebrion,
                 onCheckedChange = { 
                     tenebrion = it
-                    sharedPrefs.edit().putBoolean("tenebrion", it).apply()
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_TENEBRION, if (it) 1L else 0L)
+                    SuiKernelIoctl.syncStorage(currentConfig().copy(tenebrion = it))
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -261,9 +291,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 checked = airaniCpuset,
                 onCheckedChange = { 
                     airaniCpuset = it
-                    sharedPrefs.edit().putBoolean("airaniCpuset", it).apply()
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_AIRANI_CPUSET, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(context)
+                    SuiKernelIoctl.syncStorage(currentConfig().copy(airaniCpuset = it))
                     if (!it) showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
@@ -284,9 +313,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 checked = sandevistan,
                 onCheckedChange = { 
                     sandevistan = it
-                    sharedPrefs.edit().putBoolean("sandevistan", it).apply()
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SANDEVISTAN, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(context)
+                    SuiKernelIoctl.syncStorage(currentConfig().copy(sandevistan = it))
                     if (!it) showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
@@ -315,11 +343,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                         } else {
                             SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, sparxieSwap.toLong())
                         }
-                        sharedPrefs.edit()
-                            .putBoolean("sparxieEnabled", it)
-                            .putFloat("sparxieSwap", sparxieSwap)
-                            .apply()
-                        SuiKernelIoctl.syncStorage(context)
+                        SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieEnabled = it, sparxieSwap = if (!it) 60f else sparxieSwap))
                     }
                 )
                 
@@ -330,9 +354,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                             value = sparxieSwap,
                             onValueChange = { 
                                 sparxieSwap = it 
-                                sharedPrefs.edit().putFloat("sparxieSwap", it).apply()
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, it.toLong())
-                                SuiKernelIoctl.syncStorage(context)
+                                SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieSwap = it))
                             },
                             valueRange = 10f..100f,
                             colors = SliderDefaults.colors(
