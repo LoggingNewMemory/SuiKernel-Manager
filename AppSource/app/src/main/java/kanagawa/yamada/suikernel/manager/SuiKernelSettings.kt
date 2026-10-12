@@ -40,7 +40,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
     var tenebrion by remember { mutableStateOf(true) }
     var airaniCpuset by remember { mutableStateOf(true) }
     var sandevistan by remember { mutableStateOf(false) }
-    var sparxieSwap by remember { mutableStateOf(60f) }
+    var sparxieSwap by remember { mutableStateOf(30f) }
     var sparxieEnabled by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
@@ -332,18 +332,18 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             Column(modifier = Modifier.padding(16.dp)) {
                 SettingToggleItem(
                     title = "Sparxie Swappiness Tuner",
-                    subtitle = "Adjust swappiness value (Current: ${sparxieSwap.toInt()})",
+                    subtitle = if (sparxieEnabled) "Adjust swappiness value (Current: ${sparxieSwap.toInt()})" else "Adjust swappiness value",
                     checked = sparxieEnabled,
                     onCheckedChange = { 
                         sparxieEnabled = it
                         if (!it) {
                             showRebootToast()
-                            sparxieSwap = 60f
-                            SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, 60L)
+                            sparxieSwap = 30f
+                            SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, 30L)
                         } else {
                             SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, sparxieSwap.toLong())
                         }
-                        SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieEnabled = it, sparxieSwap = if (!it) 60f else sparxieSwap))
+                        SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieEnabled = it, sparxieSwap = if (!it) 30f else sparxieSwap))
                     }
                 )
                 

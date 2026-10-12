@@ -9,7 +9,7 @@ data class SuiKernelConfig(
     val airaniCpuset: Boolean = true,
     val sandevistan: Boolean = false,
     val sparxieEnabled: Boolean = true,
-    val sparxieSwap: Float = 60f
+    val sparxieSwap: Float = 30f
 )
 
 object SuiKernelIoctl {
@@ -64,7 +64,7 @@ object SuiKernelIoctl {
             airaniCpuset = map["airani"] != "0",
             sandevistan = map["sandevistan"] == "1",
             sparxieEnabled = map["sparxie"] != "0",
-            sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: 60f
+            sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: 30f
         )
     }
 
@@ -78,7 +78,7 @@ object SuiKernelIoctl {
                 val airaniVal = if (config.airaniCpuset) "1" else "0"
                 val sandevistanVal = if (config.sandevistan) "1" else "0"
                 val sparxieVal = if (config.sparxieEnabled) "1" else "0"
-                val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt() else 60
+                val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt() else 30
 
                 val cmd = "mkdir -p /data/SuiKernel && " +
                         "echo -n $airaniVal > /data/SuiKernel/airani && " +
@@ -119,7 +119,7 @@ object SuiKernelIoctl {
             if (config.sparxieEnabled) {
                 sendIoctl(CMD_SPARXIE_SWAP, config.sparxieSwap.toLong())
             } else {
-                sendIoctl(CMD_SPARXIE_SWAP, 60L)
+                sendIoctl(CMD_SPARXIE_SWAP, 30L)
             }
         }.start()
     }
