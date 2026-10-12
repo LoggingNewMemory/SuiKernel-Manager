@@ -58,5 +58,34 @@ object SuiKernelIoctl {
         } else {
             sendIoctl(CMD_SPARXIE_SWAP, 60L)
         }
+
+        syncStorage(context)
+    }
+
+    fun syncStorage(context: android.content.Context) {
+        Thread {
+            try {
+                val sharedPrefs = context.getSharedPreferences("SuiKernelPrefs", android.content.Context.MODE_PRIVATE)
+                val airani = sharedPrefs.getBoolean("airaniCpuset", true)
+                val sandevistan = sharedPrefs.getBoolean("sandevistan", false)
+                val sparxieEnabled = sharedPrefs.getBoolean("sparxieEnabled", true)
+                val sparxieSwap = sharedPrefs.getFloat("sparxieSwap", 60f).coerceIn(10f, 100f)
+
+                val airaniVal = if (airani) "1" else "0"
+                val sandevistanVal = if (sandevistan) "1" else "0"
+                val swappinessVal = if (sparxieEnabled) sparxieSwap.toInt() else 60
+
+                val cmd = "mkdir -p /data/SuiKernel && " +
+                        "echo -n $airaniVal > /data/SuiKernel/airani && " +
+                        "echo -n $sandevistanVal > /data/SuiKernel/sandevistan && " +
+                        "echo -n $swappinessVal > /data/SuiKernel/swappiness && " +
+                        "chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/*"
+
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                process.waitFor()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 }

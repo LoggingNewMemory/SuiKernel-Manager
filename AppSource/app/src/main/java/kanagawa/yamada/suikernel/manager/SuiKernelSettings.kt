@@ -263,6 +263,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     airaniCpuset = it
                     sharedPrefs.edit().putBoolean("airaniCpuset", it).apply()
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_AIRANI_CPUSET, if (it) 1L else 0L)
+                    SuiKernelIoctl.syncStorage(context)
                     if (!it) showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
@@ -285,6 +286,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     sandevistan = it
                     sharedPrefs.edit().putBoolean("sandevistan", it).apply()
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SANDEVISTAN, if (it) 1L else 0L)
+                    SuiKernelIoctl.syncStorage(context)
                     if (!it) showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
@@ -317,6 +319,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                             .putBoolean("sparxieEnabled", it)
                             .putFloat("sparxieSwap", sparxieSwap)
                             .apply()
+                        SuiKernelIoctl.syncStorage(context)
                     }
                 )
                 
@@ -329,6 +332,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                                 sparxieSwap = it 
                                 sharedPrefs.edit().putFloat("sparxieSwap", it).apply()
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, it.toLong())
+                                SuiKernelIoctl.syncStorage(context)
                             },
                             valueRange = 10f..100f,
                             colors = SliderDefaults.colors(
