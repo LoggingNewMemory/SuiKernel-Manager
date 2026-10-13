@@ -40,6 +40,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
     var tenebrion by remember { mutableStateOf(true) }
     var airaniCpuset by remember { mutableStateOf(true) }
     var sandevistan by remember { mutableStateOf(false) }
+    var moonaZram by remember { mutableStateOf(true) }
     var sparxieSwap by remember { mutableStateOf(30f) }
     var sparxieEnabled by remember { mutableStateOf(true) }
 
@@ -54,6 +55,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 tenebrion = config.tenebrion
                 airaniCpuset = config.airaniCpuset
                 sandevistan = config.sandevistan
+                moonaZram = config.moonaZram
                 sparxieEnabled = config.sparxieEnabled
                 sparxieSwap = config.sparxieSwap
             }
@@ -68,6 +70,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
         tenebrion = tenebrion,
         airaniCpuset = airaniCpuset,
         sandevistan = sandevistan,
+        moonaZram = moonaZram,
         sparxieEnabled = sparxieEnabled,
         sparxieSwap = sparxieSwap
     )
@@ -315,6 +318,28 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     sandevistan = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SANDEVISTAN, if (it) 1L else 0L)
                     SuiKernelIoctl.syncStorage(currentConfig().copy(sandevistan = it))
+                    if (!it) showRebootToast()
+                },
+                modifier = Modifier.padding(16.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Moona Hoshinova ZRAM Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = CardDark)
+        ) {
+            SettingToggleItem(
+                title = "Moona Hoshinova ZRAM",
+                subtitle = "Enforce page-cluster 0 & VMA readahead tweaks",
+                checked = moonaZram,
+                onCheckedChange = { 
+                    moonaZram = it
+                    SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_MOONA_ZRAM, if (it) 1L else 0L)
+                    SuiKernelIoctl.syncStorage(currentConfig().copy(moonaZram = it))
                     if (!it) showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)

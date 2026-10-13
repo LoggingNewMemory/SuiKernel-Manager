@@ -8,6 +8,7 @@ data class SuiKernelConfig(
     val tenebrion: Boolean = true,
     val airaniCpuset: Boolean = true,
     val sandevistan: Boolean = false,
+    val moonaZram: Boolean = true,
     val sparxieEnabled: Boolean = true,
     val sparxieSwap: Float = 30f
 )
@@ -32,11 +33,12 @@ object SuiKernelIoctl {
     const val CMD_SPARXIE_SWAP = 0x1B3FB033L
     const val CMD_AIRANI_CPUSET = 0x2FC6501BL
     const val CMD_SANDEVISTAN = 0x27B55B18L
+    const val CMD_MOONA_ZRAM = 0x3E8B1A4CL
 
     fun readStorage(): SuiKernelConfig {
         val map = mutableMapOf<String, String>()
         try {
-            val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
+            val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan moona_zram sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
@@ -63,6 +65,7 @@ object SuiKernelIoctl {
             tenebrion = map["tenebrion"] != "0",
             airaniCpuset = map["airani"] != "0",
             sandevistan = map["sandevistan"] == "1",
+            moonaZram = map["moona_zram"] != "0",
             sparxieEnabled = map["sparxie"] != "0",
             sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: 30f
         )
@@ -77,12 +80,14 @@ object SuiKernelIoctl {
                 val tenebrionVal = if (config.tenebrion) "1" else "0"
                 val airaniVal = if (config.airaniCpuset) "1" else "0"
                 val sandevistanVal = if (config.sandevistan) "1" else "0"
+                val moonaVal = if (config.moonaZram) "1" else "0"
                 val sparxieVal = if (config.sparxieEnabled) "1" else "0"
                 val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt() else 30
 
                 val cmd = "mkdir -p /data/SuiKernel && " +
                         "echo -n $airaniVal > /data/SuiKernel/airani && " +
                         "echo -n $sandevistanVal > /data/SuiKernel/sandevistan && " +
+                        "echo -n $moonaVal > /data/SuiKernel/moona_zram && " +
                         "echo -n $sparxieVal > /data/SuiKernel/sparxie && " +
                         "echo -n $swappinessVal > /data/SuiKernel/swappiness && " +
                         "echo -n $inahoVal > /data/SuiKernel/inaho && " +
@@ -116,6 +121,7 @@ object SuiKernelIoctl {
             sendIoctl(CMD_TENEBRION, if (config.tenebrion) 1L else 0L)
             sendIoctl(CMD_AIRANI_CPUSET, if (config.airaniCpuset) 1L else 0L)
             sendIoctl(CMD_SANDEVISTAN, if (config.sandevistan) 1L else 0L)
+            sendIoctl(CMD_MOONA_ZRAM, if (config.moonaZram) 1L else 0L)
             if (config.sparxieEnabled) {
                 sendIoctl(CMD_SPARXIE_SWAP, config.sparxieSwap.toLong())
             } else {
