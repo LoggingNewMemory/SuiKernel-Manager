@@ -15,7 +15,7 @@ data class SuiKernelConfig(
 
 object SuiKernelIoctl {
     init {
-        try {   
+        try {
             System.loadLibrary("suikernel_ioctl")
         } catch (e: Exception) {
             e.printStackTrace()
