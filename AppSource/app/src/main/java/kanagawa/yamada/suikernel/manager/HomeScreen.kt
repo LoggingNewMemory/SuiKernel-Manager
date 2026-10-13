@@ -38,7 +38,10 @@ object WallpaperCache {
 }
 
 @Composable
-fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
+fun DashboardScreen(
+    onNavigateToSettings: () -> Unit = {},
+    onNavigateToRecomendedModules: () -> Unit = {}
+) {
     val context = LocalContext.current
     val wallpaperBitmap by WallpaperCache.bitmap
     var fetchTrigger by remember { mutableStateOf(0) }
@@ -383,7 +386,9 @@ fun DashboardScreen(onNavigateToSettings: () -> Unit = {}) {
 
         // Recommended Modules
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onNavigateToRecomendedModules() },
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = CardDark)
         ) {
