@@ -32,17 +32,19 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
         android.widget.Toast.makeText(context, "Please Reboot", android.widget.Toast.LENGTH_SHORT).show()
     }
 
-    var anyaThermal by remember { mutableStateOf(true) }
-    var yamadaBoost by remember { mutableStateOf(true) }
-    var performanceMode by remember { mutableStateOf("Balanced") }
+    var isLoaded by remember { mutableStateOf(SuiKernelIoctl.isLoaded) }
+    val initialConfig = SuiKernelIoctl.cachedConfig
+    var anyaThermal by remember { mutableStateOf(initialConfig.anyaThermal) }
+    var yamadaBoost by remember { mutableStateOf(initialConfig.yamadaBoost) }
+    var performanceMode by remember { mutableStateOf(initialConfig.performanceMode) }
     
-    var inahoAudio by remember { mutableStateOf(true) }
-    var tenebrion by remember { mutableStateOf(true) }
-    var airaniCpuset by remember { mutableStateOf(true) }
-    var sandevistan by remember { mutableStateOf(false) }
-    var moonaZram by remember { mutableStateOf(true) }
-    var sparxieSwap by remember { mutableStateOf(30f) }
-    var sparxieEnabled by remember { mutableStateOf(true) }
+    var inahoAudio by remember { mutableStateOf(initialConfig.inahoAudio) }
+    var tenebrion by remember { mutableStateOf(initialConfig.tenebrion) }
+    var airaniCpuset by remember { mutableStateOf(initialConfig.airaniCpuset) }
+    var sandevistan by remember { mutableStateOf(initialConfig.sandevistan) }
+    var moonaZram by remember { mutableStateOf(initialConfig.moonaZram) }
+    var sparxieSwap by remember { mutableStateOf(initialConfig.sparxieSwap) }
+    var sparxieEnabled by remember { mutableStateOf(initialConfig.sparxieEnabled) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -58,6 +60,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 moonaZram = config.moonaZram
                 sparxieEnabled = config.sparxieEnabled
                 sparxieSwap = config.sparxieSwap
+                isLoaded = true
             }
         }
     }

@@ -24,6 +24,9 @@ object SuiKernelIoctl {
 
     external fun sendIoctl(cmd: Long, arg: Long): Int
 
+    var cachedConfig: SuiKernelConfig = SuiKernelConfig()
+    var isLoaded: Boolean = false
+
     const val CMD_ANYA_THERMAL = 0x392C8989L
     const val CMD_YAMADA_TOUCH_BOOST_DISABLE = 0x7A1F2C3BL
     const val CMD_YAMADA_TOUCH_BOOST_BALANCED = 0x5C3E8A1DL
@@ -57,7 +60,7 @@ object SuiKernelIoctl {
         val yamadaBoost = touchBoost != "0"
         val performanceMode = if (touchBoost == "2") "Gaming" else "Balanced"
 
-        return SuiKernelConfig(
+        val config = SuiKernelConfig(
             anyaThermal = map["anya_thermal"] != "0",
             yamadaBoost = yamadaBoost,
             performanceMode = performanceMode,
@@ -69,9 +72,13 @@ object SuiKernelIoctl {
             sparxieEnabled = map["sparxie"] != "0",
             sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: 30f
         )
+        cachedConfig = config
+        isLoaded = true
+        return config
     }
 
     fun syncStorage(config: SuiKernelConfig) {
+        cachedConfig = config
         Thread {
             try {
                 val anyaVal = if (config.anyaThermal) "1" else "0"

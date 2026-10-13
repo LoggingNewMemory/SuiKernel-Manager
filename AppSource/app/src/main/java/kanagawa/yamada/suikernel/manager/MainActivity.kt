@@ -22,6 +22,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        
+        // Warm up config cache in background so settings screen has immediate accurate state
+        Thread {
+            SuiKernelIoctl.readStorage()
+        }.start()
+
         setContent {
             SuiKernelManagerTheme {
                 Surface(
