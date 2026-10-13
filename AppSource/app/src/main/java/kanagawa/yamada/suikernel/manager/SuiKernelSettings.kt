@@ -296,7 +296,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     airaniCpuset = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_AIRANI_CPUSET, if (it) 1L else 0L)
                     SuiKernelIoctl.syncStorage(currentConfig().copy(airaniCpuset = it))
-                    if (!it) showRebootToast()
+                    showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -318,7 +318,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     sandevistan = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SANDEVISTAN, if (it) 1L else 0L)
                     SuiKernelIoctl.syncStorage(currentConfig().copy(sandevistan = it))
-                    if (!it) showRebootToast()
+                    showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -340,7 +340,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     moonaZram = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_MOONA_ZRAM, if (it) 1L else 0L)
                     SuiKernelIoctl.syncStorage(currentConfig().copy(moonaZram = it))
-                    if (!it) showRebootToast()
+                    showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -361,8 +361,8 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                     checked = sparxieEnabled,
                     onCheckedChange = { 
                         sparxieEnabled = it
+                        showRebootToast()
                         if (!it) {
-                            showRebootToast()
                             sparxieSwap = 30f
                             SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, 30L)
                         } else {
