@@ -47,7 +47,8 @@ import java.net.URL
 enum class ModuleStatus {
     DOWNLOAD,
     UPDATE,
-    INSTALLED
+    INSTALLED,
+    REBOOT
 }
 
 data class RecomendedModuleItem(
@@ -127,6 +128,8 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     fun refreshModules() {
         coroutineScope.launch(Dispatchers.IO) {
+            val pendingReboot = getPendingRebootRepos(context)
+
             // Phase 1: FAST LOCAL CHECK
             // Immediately query ksud module list to mark installed modules with "OK" (no network delay)
             val installedList = fetchInstalledModules()
@@ -134,10 +137,11 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
                 if (installed != null) {
                     saveCachedModuleInfo(context, item.repo, installed.version)
+                    val status = if (pendingReboot.contains(item.repo)) ModuleStatus.REBOOT else ModuleStatus.INSTALLED
                     item.copy(
                         id = installed.id,
                         version = installed.version,
-                        status = ModuleStatus.INSTALLED,
+                        status = status,
                         isBusy = false,
                         progressText = "",
                         downloadProgress = 0f
@@ -183,6 +187,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 val displayVersion = installed?.version ?: latest
 
                 val status = when {
+                    pendingReboot.contains(item.repo) -> ModuleStatus.REBOOT
                     installed == null -> ModuleStatus.DOWNLOAD
                     latest.isNotBlank() && isNewerVersion(latest, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
                     else -> ModuleStatus.INSTALLED
@@ -268,6 +273,13 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 ModuleRowItem(
                     module = module,
                     onActionClick = {
+                        if (module.status == ModuleStatus.REBOOT) {
+                            Toast.makeText(context, "Rebooting device...", Toast.LENGTH_SHORT).show()
+                            coroutineScope.launch(Dispatchers.IO) {
+                                rebootDevice()
+                            }
+                            return@ModuleRowItem
+                        }
                         if (module.status == ModuleStatus.INSTALLED) {
                             Toast.makeText(context, "${module.title} is already installed", Toast.LENGTH_SHORT).show()
                             return@ModuleRowItem
@@ -353,10 +365,11 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                                 }
                             }
 
+                            markModulePendingReboot(context, module.repo)
                             isInstalling = false
-                            consoleOutput = (consoleOutput ?: "") + "\n\n--- Finished! Please Reboot if required ---"
+                            consoleOutput = (consoleOutput ?: "") + "\n\n--- Finished! Please Reboot to activate ---"
                             modulesState = modulesState.map {
-                                if (it.repo == module.repo) it.copy(isBusy = false, progressText = "", downloadProgress = 0f) else it
+                                if (it.repo == module.repo) it.copy(status = ModuleStatus.REBOOT, isBusy = false, progressText = "", downloadProgress = 0f) else it
                             }
                             refreshModules()
                         }
@@ -423,8 +436,14 @@ fun ModuleRowItem(
                     1.0f to whiteColor
                 )
 
+                val displayTitle = when (module.status) {
+                    ModuleStatus.UPDATE -> "${module.title} - UPDATE"
+                    ModuleStatus.REBOOT -> "${module.title} - REBOOT"
+                    else -> module.title
+                }
+
                 Text(
-                    text = if (module.status == ModuleStatus.UPDATE) "${module.title} - UPDATE" else module.title,
+                    text = displayTitle,
                     fontFamily = GoogleSansFlex,
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp,
@@ -438,6 +457,18 @@ fun ModuleRowItem(
                                 withStyle(SpanStyle(color = Color.White)) { append(module.title) }
                                 append(" - ")
                                 withStyle(SpanStyle(color = Color(0xFFE05A67))) { append("UPDATE") }
+                            },
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        )
+                    }
+                    ModuleStatus.REBOOT -> {
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(color = Color.White)) { append(module.title) }
+                                append(" - ")
+                                withStyle(SpanStyle(color = Color(0xFFFFF185))) { append("REBOOT") }
                             },
                             fontFamily = GoogleSansFlex,
                             fontWeight = FontWeight.Bold,
@@ -530,6 +561,14 @@ fun ModuleRowItem(
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_download_upd),
                                 contentDescription = "Update ${module.title}",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        ModuleStatus.REBOOT -> {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_restart),
+                                contentDescription = "Reboot for ${module.title}",
                                 tint = Color.Unspecified,
                                 modifier = Modifier.size(26.dp)
                             )

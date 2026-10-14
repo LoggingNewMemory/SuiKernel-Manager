@@ -552,3 +552,50 @@ fun rebootDevice() {
         e.printStackTrace()
     }
 }
+
+// ----------------- MODULE REBOOT TRACKING HELPERS -----------------
+
+private const val PREFS_REBOOT_PENDING = "module_reboot_pending"
+private const val KEY_BOOT_ID = "last_boot_id"
+private const val KEY_PENDING_REPOS = "pending_repos"
+
+private fun getSystemBootId(): String {
+    return try {
+        File("/proc/sys/kernel/random/boot_id").readText().trim()
+    } catch (e: Exception) {
+        android.os.SystemClock.elapsedRealtime().toString()
+    }
+}
+
+fun getPendingRebootRepos(context: Context): Set<String> {
+    return try {
+        val prefs = context.getSharedPreferences(PREFS_REBOOT_PENDING, Context.MODE_PRIVATE)
+        val savedBootId = prefs.getString(KEY_BOOT_ID, "") ?: ""
+        val currentBootId = getSystemBootId()
+        if (savedBootId != currentBootId) {
+            // Boot ID changed -> system has rebooted since, clear pending set
+            prefs.edit().putString(KEY_BOOT_ID, currentBootId).remove(KEY_PENDING_REPOS).apply()
+            emptySet()
+        } else {
+            prefs.getStringSet(KEY_PENDING_REPOS, emptySet()) ?: emptySet()
+        }
+    } catch (e: Exception) {
+        emptySet()
+    }
+}
+
+fun markModulePendingReboot(context: Context, repo: String) {
+    try {
+        val prefs = context.getSharedPreferences(PREFS_REBOOT_PENDING, Context.MODE_PRIVATE)
+        val currentBootId = getSystemBootId()
+        val currentSet = prefs.getStringSet(KEY_PENDING_REPOS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        currentSet.add(repo)
+        prefs.edit()
+            .putString(KEY_BOOT_ID, currentBootId)
+            .putStringSet(KEY_PENDING_REPOS, currentSet)
+            .apply()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
