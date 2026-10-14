@@ -193,7 +193,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     if (consoleOutput != null) {
         // Installation terminal output modal
-        InstallConsoleScreen(
+        ModuleInstallPrompt(
             title = "Module Flasher",
             output = consoleOutput ?: "",
             isInstalling = isInstalling,
