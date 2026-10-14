@@ -104,19 +104,40 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     fun refreshModules() {
         coroutineScope.launch(Dispatchers.IO) {
+            // Phase 1: FAST LOCAL CHECK
+            // Immediately query ksud module list to mark installed modules with "OK" (no network delay)
             val installedMap = fetchInstalledModules()
-            val updated = modulesState.map { item ->
+            val localChecked = modulesState.map { item ->
+                val installed = installedMap[item.id]
+                if (installed != null) {
+                    item.copy(
+                        version = installed.version,
+                        status = ModuleStatus.INSTALLED
+                    )
+                } else {
+                    item.copy(
+                        status = ModuleStatus.DOWNLOAD
+                    )
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                modulesState = localChecked
+            }
+
+            // Phase 2: ASYNC REMOTE CHECK
+            // Check GitHub releases in background to determine if an update is available and populate download URLs
+            val updated = localChecked.map { item ->
                 val def = moduleDefs.firstOrNull { it.id == item.id }
                 val (latestTag, downloadUrl) = if (def != null) fetchLatestRelease(def.repo, def.assetFilter) else Pair("", "")
                 
                 val installed = installedMap[item.id]
                 val latest = if (latestTag.isNotBlank()) latestTag else item.latestVersion
-                
                 val displayVersion = installed?.version ?: latest
 
                 val status = when {
                     installed == null -> ModuleStatus.DOWNLOAD
-                    isNewerVersion(latest, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
+                    latestTag.isNotBlank() && isNewerVersion(latestTag, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
                     else -> ModuleStatus.INSTALLED
                 }
 
@@ -129,6 +150,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     progressText = ""
                 )
             }
+
             withContext(Dispatchers.Main) {
                 modulesState = updated
             }
@@ -275,13 +297,26 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                             consoleOutput = consoleOutput + "\n--- Download Complete (${zipFile.length() / 1024} KB) ---\n"
                             consoleOutput = consoleOutput + "- Running module installer via ksud...\n\n"
 
-                            withContext(Dispatchers.IO) {
-                                flashModuleZip(zipFile) { line ->
-                                    coroutineScope.launch(Dispatchers.Main) {
-                                        consoleOutput = (consoleOutput ?: "") + line + "\n"
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    flashModuleZip(zipFile) { line ->
+                                        coroutineScope.launch(Dispatchers.Main) {
+                                            consoleOutput = (consoleOutput ?: "") + line + "\n"
+                                        }
                                     }
                                 }
-                                zipFile.delete()
+                            } finally {
+                                withContext(Dispatchers.IO) {
+                                    try {
+                                        if (zipFile.exists()) {
+                                            zipFile.delete()
+                                        }
+                                        // Root rm cleanup as guaranteed fallback
+                                        Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f '${zipFile.absolutePath}'")).waitFor()
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }
                             }
 
                             isInstalling = false

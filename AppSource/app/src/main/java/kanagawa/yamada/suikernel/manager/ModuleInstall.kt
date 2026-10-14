@@ -30,7 +30,8 @@ import java.net.URL
 data class InstalledModuleInfo(
     val id: String,
     val version: String,
-    val versionCode: Int
+    val versionCode: Int,
+    val hasPendingUpdate: Boolean = false
 )
 
 data class DefinitionItem(
@@ -128,8 +129,9 @@ fun fetchInstalledModules(): Map<String, InstalledModuleInfo> {
                 val id = obj.optString("id", "")
                 val version = obj.optString("version", "")
                 val versionCode = obj.optInt("versionCode", 0)
+                val hasPendingUpdate = obj.optBoolean("update", false)
                 if (id.isNotBlank()) {
-                    map[id] = InstalledModuleInfo(id, version, versionCode)
+                    map[id] = InstalledModuleInfo(id, version, versionCode, hasPendingUpdate)
                 }
             }
         }
@@ -203,26 +205,38 @@ fun fetchLatestRelease(repo: String, assetFilter: ((String) -> Boolean)? = null)
 
 fun isNewerVersion(latestTag: String, installedVersion: String, installedVersionCode: Int): Boolean {
     if (latestTag.isBlank() || installedVersion.isBlank()) return false
-    
-    // Compare integer versionCode if tag is pure number
+
+    // If installedVersion contains or equals the latest tag (e.g. BreZygisk "551" inside "v1.0.0 (551-10-8806ea1-release)" or versionCode == 551)
+    if (installedVersion.equals(latestTag, ignoreCase = true)) return false
+    if (installedVersion.contains(latestTag, ignoreCase = true)) return false
+
+    // Compare pure integer versionCode
     val tagInt = latestTag.filter { it.isDigit() }.toIntOrNull()
+    if (tagInt != null && installedVersionCode > 0) {
+        return tagInt > installedVersionCode
+    }
+
     val installedInt = installedVersion.filter { it.isDigit() }.toIntOrNull()
-    if (tagInt != null && installedInt != null && tagInt != installedInt) {
+    if (tagInt != null && installedInt != null) {
         return tagInt > installedInt
     }
 
     // Compare semver components
-    val cleanLatest = latestTag.trimStart('v', 'V').split("-")[0]
+    val cleanLatest = latestTag.trimStart('v', 'V').split("-")[0].split(" ")[0]
     val cleanInstalled = installedVersion.trimStart('v', 'V').split("-")[0].split(" ")[0]
+
+    if (cleanLatest.equals(cleanInstalled, ignoreCase = true)) return false
 
     val v1Parts = cleanLatest.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
     val v2Parts = cleanInstalled.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
 
-    for (i in 0 until maxOf(v1Parts.size, v2Parts.size)) {
-        val part1 = v1Parts.getOrElse(i) { 0 }
-        val part2 = v2Parts.getOrElse(i) { 0 }
-        if (part1 > part2) return true
-        if (part1 < part2) return false
+    if (v1Parts.isNotEmpty() && v2Parts.isNotEmpty()) {
+        for (i in 0 until maxOf(v1Parts.size, v2Parts.size)) {
+            val part1 = v1Parts.getOrElse(i) { 0 }
+            val part2 = v2Parts.getOrElse(i) { 0 }
+            if (part1 > part2) return true
+            if (part1 < part2) return false
+        }
     }
 
     return false
