@@ -49,14 +49,14 @@ enum class ModuleStatus {
 }
 
 data class RecomendedModuleItem(
-    val id: String,
+    val id: String = "",
     val title: String,
     val author: String,
-    val version: String,
-    val latestVersion: String,
     val repo: String,
-    val downloadUrl: String,
-    val status: ModuleStatus,
+    val version: String = "",
+    val latestVersion: String = "",
+    val downloadUrl: String = "",
+    val status: ModuleStatus = ModuleStatus.DOWNLOAD,
     val isBusy: Boolean = false,
     val progressText: String = "",
     val downloadProgress: Float = 0f
@@ -72,16 +72,36 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     val moduleDefs = remember {
         listOf(
-            DefinitionItem("brene", "Brene SUSFS", "rrr333nnn333", "v0.0.71", "rrr333nnn333/BRENE"),
-            DefinitionItem("rezygisk", "BreZygisk", "rrr333nnn333", "551", "rrr333nnn333/BreZygisk"),
-            DefinitionItem("treat_wheel", "BreWheel", "rrr333nnn333", "0.0.11+", "rrr333nnn333/BreWheel"),
-            DefinitionItem("zygisk_vector", "Vector", "JingMatrix", "v2.2", "JingMatrix/Vector") { name ->
-                name.contains("release", ignoreCase = true) || !name.contains("debug", ignoreCase = true)
-            },
-            DefinitionItem("tricky_store", "Always Strong", "evoker0", "v1.0.4", "evoker0/AlwaysStrong") { name ->
-                name.contains("inject", ignoreCase = true)
-            },
-            DefinitionItem("nomount", "NoMount", "maxsteeel", "v2.1.1", "maxsteeel/nomount")
+            DefinitionItem(
+                title = "Brene SUSFS",
+                author = "rrr333nnn333",
+                repo = "rrr333nnn333/BRENE"
+            ),
+            DefinitionItem(
+                title = "BreZygisk",
+                author = "rrr333nnn333",
+                repo = "rrr333nnn333/BreZygisk"
+            ),
+            DefinitionItem(
+                title = "BreWheel",
+                author = "rrr333nnn333",
+                repo = "rrr333nnn333/BreWheel"
+            ),
+            DefinitionItem(
+                title = "Vector",
+                author = "JingMatrix",
+                repo = "JingMatrix/Vector"
+            ),
+            DefinitionItem(
+                title = "Always Strong",
+                author = "evoker0",
+                repo = "evoker0/AlwaysStrong"
+            ),
+            DefinitionItem(
+                title = "NoMount",
+                author = "maxsteeel",
+                repo = "maxsteeel/nomount"
+            )
         )
     }
 
@@ -89,12 +109,11 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
         mutableStateOf(
             moduleDefs.map { def ->
                 RecomendedModuleItem(
-                    id = def.id,
                     title = def.title,
                     author = def.author,
-                    version = def.defaultVersion,
-                    latestVersion = def.defaultVersion,
                     repo = def.repo,
+                    version = "",
+                    latestVersion = "",
                     downloadUrl = "",
                     status = ModuleStatus.DOWNLOAD
                 )
@@ -106,11 +125,12 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
         coroutineScope.launch(Dispatchers.IO) {
             // Phase 1: FAST LOCAL CHECK
             // Immediately query ksud module list to mark installed modules with "OK" (no network delay)
-            val installedMap = fetchInstalledModules()
+            val installedList = fetchInstalledModules()
             val localChecked = modulesState.map { item ->
-                val installed = installedMap[item.id]
+                val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
                 if (installed != null) {
                     item.copy(
+                        id = installed.id,
                         version = installed.version,
                         status = ModuleStatus.INSTALLED
                     )
@@ -126,12 +146,13 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             }
 
             // Phase 2: ASYNC REMOTE CHECK
-            // Check GitHub releases in background to determine if an update is available and populate download URLs
+            // Check update.json first, then fall back to GitHub releases in background
             val updated = localChecked.map { item ->
-                val def = moduleDefs.firstOrNull { it.id == item.id }
-                val (latestTag, downloadUrl) = if (def != null) fetchLatestRelease(def.repo, def.assetFilter) else Pair("", "")
+                val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
+                val effectiveUpdateJson = installed?.updateJson?.ifBlank { null }
+
+                val (latestTag, downloadUrl) = fetchLatestRelease(item.repo, effectiveUpdateJson)
                 
-                val installed = installedMap[item.id]
                 val latest = if (latestTag.isNotBlank()) latestTag else item.latestVersion
                 val displayVersion = installed?.version ?: latest
 
@@ -142,6 +163,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 }
 
                 item.copy(
+                    id = installed?.id ?: item.id,
                     version = displayVersion,
                     latestVersion = latest,
                     downloadUrl = downloadUrl,
@@ -227,7 +249,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            items(modulesState, key = { it.id }) { module ->
+            items(modulesState, key = { it.repo }) { module ->
                 ModuleRowItem(
                     module = module,
                     onActionClick = {
@@ -239,22 +261,19 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                         // Start Download and Install
                         coroutineScope.launch {
                             modulesState = modulesState.map {
-                                if (it.id == module.id) it.copy(isBusy = true, progressText = "Preparing...", downloadProgress = 0f) else it
+                                if (it.repo == module.repo) it.copy(isBusy = true, progressText = "Preparing...", downloadProgress = 0f) else it
                             }
 
                             // If downloadUrl is blank, attempt to resolve it now
                             var targetUrl = module.downloadUrl
                             if (targetUrl.isBlank()) {
-                                val def = moduleDefs.firstOrNull { it.id == module.id }
-                                if (def != null) {
-                                    val (latestTag, url) = withContext(Dispatchers.IO) {
-                                        fetchLatestRelease(def.repo, def.assetFilter)
-                                    }
-                                    if (url.isNotBlank()) {
-                                        targetUrl = url
-                                        modulesState = modulesState.map {
-                                            if (it.id == module.id) it.copy(downloadUrl = url, latestVersion = latestTag.ifBlank { it.latestVersion }) else it
-                                        }
+                                val (latestTag, url) = withContext(Dispatchers.IO) {
+                                    fetchLatestRelease(module.repo)
+                                }
+                                if (url.isNotBlank()) {
+                                    targetUrl = url
+                                    modulesState = modulesState.map {
+                                        if (it.repo == module.repo) it.copy(downloadUrl = url, latestVersion = latestTag.ifBlank { it.latestVersion }) else it
                                     }
                                 }
                             }
@@ -262,7 +281,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                             if (targetUrl.isBlank()) {
                                 Toast.makeText(context, "Could not fetch release URL. Check connection.", Toast.LENGTH_SHORT).show()
                                 modulesState = modulesState.map {
-                                    if (it.id == module.id) it.copy(isBusy = false, progressText = "") else it
+                                    if (it.repo == module.repo) it.copy(isBusy = false, progressText = "") else it
                                 }
                                 return@launch
                             }
@@ -273,7 +292,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                             val zipFile = withContext(Dispatchers.IO) {
                                 downloadModuleZip(context, targetUrl) { progress ->
                                     modulesState = modulesState.map {
-                                        if (it.id == module.id) it.copy(
+                                        if (it.repo == module.repo) it.copy(
                                             progressText = "$progress%",
                                             downloadProgress = (progress / 100f).coerceIn(0f, 1f)
                                         ) else it
@@ -285,13 +304,13 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                                 isInstalling = false
                                 consoleOutput = consoleOutput + "\n[!] Download failed or invalid file."
                                 modulesState = modulesState.map {
-                                    if (it.id == module.id) it.copy(isBusy = false, progressText = "", downloadProgress = 0f) else it
+                                    if (it.repo == module.repo) it.copy(isBusy = false, progressText = "", downloadProgress = 0f) else it
                                 }
                                 return@launch
                             }
 
                             modulesState = modulesState.map {
-                                if (it.id == module.id) it.copy(progressText = "Flashing...", downloadProgress = 1f) else it
+                                if (it.repo == module.repo) it.copy(progressText = "Flashing...", downloadProgress = 1f) else it
                             }
 
                             consoleOutput = consoleOutput + "\n--- Download Complete (${zipFile.length() / 1024} KB) ---\n"
@@ -403,8 +422,12 @@ fun ModuleRowItem(
             // Subtitle
             val subtitleVersion = if (module.status == ModuleStatus.UPDATE) {
                 "${module.version} → ${module.latestVersion}"
-            } else {
+            } else if (module.version.isNotBlank()) {
                 module.version
+            } else if (module.latestVersion.isNotBlank()) {
+                module.latestVersion
+            } else {
+                "Checking..."
             }
 
             Text(
