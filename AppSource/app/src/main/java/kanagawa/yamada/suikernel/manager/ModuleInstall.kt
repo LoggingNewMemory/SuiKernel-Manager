@@ -238,6 +238,51 @@ fun fetchLatestRelease(
     return Pair("", "")
 }
 
+fun resolveCleanVersion(rawTag: String, releaseTitle: String = "", zipUrl: String = ""): String {
+    val tag = rawTag.trim()
+    val tagNum = tag.trimStart('v', 'V')
+    if (tagNum.all { it.isDigit() } && tagNum.isNotBlank()) {
+        return tag // e.g. "551"
+    }
+
+    // Standard semver tag like "v0.0.71", "v2.2", "v1.0.4", "v2.1.1"
+    if ("""^v?\d+(\.\d+)+(\+)?$""".toRegex(RegexOption.IGNORE_CASE).matches(tag)) {
+        return tag
+    }
+
+    val semverRegex = """v?(\d+(\.\d+)+(\+)?)""".toRegex(RegexOption.IGNORE_CASE)
+
+    // Check release title (e.g. "BreWheel 0.0.11+")
+    if (releaseTitle.isNotBlank()) {
+        val m = semverRegex.find(releaseTitle)
+        if (m != null) {
+            return m.value
+        }
+    }
+
+    // Check zip filename (e.g. "BreWheel-0.0.11+.zip")
+    if (zipUrl.isNotBlank()) {
+        try {
+            val decoded = java.net.URLDecoder.decode(zipUrl, "UTF-8")
+            val filename = decoded.substringAfterLast("/")
+            val m = semverRegex.find(filename)
+            if (m != null) {
+                return m.value
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
+    // Check if tag contains semver inside it
+    val m = semverRegex.find(tag)
+    if (m != null) {
+        return m.value
+    }
+
+    return tag
+}
+
 private fun fetchGitHubReleaseViaWeb(repo: String): Pair<String, String>? {
     return try {
         val repoUrl = "https://github.com/$repo"
@@ -251,8 +296,11 @@ private fun fetchGitHubReleaseViaWeb(repo: String): Pair<String, String>? {
         val redirectUrl = connection.getHeaderField("Location")
         connection.disconnect()
 
-        val tag = if (redirectUrl != null && redirectUrl.contains("/tag/")) {
-            redirectUrl.substringAfterLast("/tag/").substringBefore("?").substringBefore("#")
+        var tag: String? = null
+        var releaseTitle = ""
+
+        if (redirectUrl != null && redirectUrl.contains("/tag/")) {
+            tag = redirectUrl.substringAfterLast("/tag/").substringBefore("?").substringBefore("#")
         } else {
             val releasesConn = URL("$repoUrl/releases").openConnection() as HttpURLConnection
             releasesConn.connectTimeout = 5000
@@ -260,8 +308,17 @@ private fun fetchGitHubReleaseViaWeb(repo: String): Pair<String, String>? {
             releasesConn.setRequestProperty("User-Agent", "SuiKernelManager")
             val releasesHtml = releasesConn.inputStream.bufferedReader().use { it.readText() }
             releasesConn.disconnect()
-            """/releases/tag/([^"/?\s]+)""".toRegex().find(releasesHtml)?.groupValues?.get(1)
-        } ?: return null
+
+            val tagLinkMatch = """href="[^"]*/releases/tag/([^"/?\s]+)"[^>]*>\s*([^<]+)\s*</a>""".toRegex().find(releasesHtml)
+            if (tagLinkMatch != null) {
+                tag = tagLinkMatch.groupValues[1]
+                releaseTitle = tagLinkMatch.groupValues[2].trim()
+            } else {
+                tag = """/releases/tag/([^"/?\s]+)""".toRegex().find(releasesHtml)?.groupValues?.get(1)
+            }
+        }
+
+        if (tag.isNullOrBlank()) return null
 
         val assetUrl = "$repoUrl/releases/expanded_assets/$tag"
         val assetConn = URL(assetUrl).openConnection() as HttpURLConnection
@@ -278,7 +335,8 @@ private fun fetchGitHubReleaseViaWeb(repo: String): Pair<String, String>? {
 
         val bestZip = selectBestZip(zipMatches)
         if (bestZip != null) {
-            Pair(tag, bestZip)
+            val cleanVersion = resolveCleanVersion(tag, releaseTitle, bestZip)
+            Pair(cleanVersion, bestZip)
         } else null
     } catch (e: Exception) {
         null
@@ -316,11 +374,36 @@ private fun fetchGitHubReleaseViaApi(repo: String): Pair<String, String>? {
         }
     }
 
+    // If releases/latest was 404 (e.g. only pre-releases exist), fall back to /releases?per_page=1
+    if (jsonStr.isBlank() || jsonStr.contains("\"status\":\"404\"") || jsonStr.contains("\"message\":\"Not Found\"")) {
+        try {
+            val url = URL("https://api.github.com/repos/$repo/releases?per_page=1")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "SuiKernelManager")
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+
+            if (conn.responseCode == 200) {
+                val arrayText = conn.inputStream.bufferedReader().use { it.readText() }.trim()
+                if (arrayText.startsWith("[") && arrayText.endsWith("]")) {
+                    val arr = JSONArray(arrayText)
+                    if (arr.length() > 0) {
+                        jsonStr = arr.getJSONObject(0).toString()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Fall back
+        }
+    }
+
     if (jsonStr.isBlank()) return null
 
     return try {
         val json = JSONObject(jsonStr)
         val tag = json.optString("tag_name", "")
+        val releaseName = json.optString("name", "")
         val assets = json.optJSONArray("assets")
         val urls = mutableListOf<String>()
         if (assets != null) {
@@ -333,7 +416,10 @@ private fun fetchGitHubReleaseViaApi(repo: String): Pair<String, String>? {
             }
         }
         val bestZip = selectBestZip(urls)
-        if (bestZip != null) Pair(tag, bestZip) else null
+        if (bestZip != null) {
+            val cleanVersion = resolveCleanVersion(tag, releaseName, bestZip)
+            Pair(cleanVersion, bestZip)
+        } else null
     } catch (e: Exception) {
         null
     }
@@ -342,29 +428,50 @@ private fun fetchGitHubReleaseViaApi(repo: String): Pair<String, String>? {
 fun isNewerVersion(latestTag: String, installedVersion: String, installedVersionCode: Int): Boolean {
     if (latestTag.isBlank() || installedVersion.isBlank()) return false
 
-    // If installedVersion contains or equals the latest tag (e.g. BreZygisk "551" inside "v1.0.0 (551-10-8806ea1-release)" or versionCode == 551)
     if (installedVersion.equals(latestTag, ignoreCase = true)) return false
-    if (installedVersion.contains(latestTag, ignoreCase = true)) return false
 
-    // Compare pure integer versionCode
-    val tagInt = latestTag.filter { it.isDigit() }.toIntOrNull()
-    if (tagInt != null && installedVersionCode > 0) {
-        return tagInt > installedVersionCode
+    fun normalize(v: String): String {
+        return v.trim()
+            .trimStart('v', 'V')
+            .trimEnd('+')
+            .split("-")[0]
+            .split(" ")[0]
+            .trim()
     }
 
-    val installedInt = installedVersion.filter { it.isDigit() }.toIntOrNull()
-    if (tagInt != null && installedInt != null) {
-        return tagInt > installedInt
+    val normLatest = normalize(latestTag)
+    val normInstalled = normalize(installedVersion)
+
+    if (normLatest.isNotBlank() && normLatest.equals(normInstalled, ignoreCase = true)) {
+        return false
+    }
+
+    // Check containment if one wraps the other (e.g. "v1.0.0 (551-release)" contains "551" or "0.0.11" inside "0.0.11+")
+    if (normInstalled.isNotBlank() && normLatest.isNotBlank()) {
+        if (normLatest.contains(normInstalled, ignoreCase = true) || normInstalled.contains(normLatest, ignoreCase = true)) {
+            val p1 = normLatest.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
+            val p2 = normInstalled.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
+            if (p1.isNotEmpty() && p1 == p2) {
+                return false
+            }
+        }
+    }
+
+    // Compare pure integer versionCode (e.g. "551")
+    val pureLatestInt = latestTag.trim().trimStart('v', 'V').toIntOrNull()
+    if (pureLatestInt != null) {
+        if (installedVersionCode > 0) {
+            return pureLatestInt > installedVersionCode
+        }
+        val pureInstalledInt = installedVersion.trim().trimStart('v', 'V').toIntOrNull()
+        if (pureInstalledInt != null) {
+            return pureLatestInt > pureInstalledInt
+        }
     }
 
     // Compare semver components
-    val cleanLatest = latestTag.trimStart('v', 'V').split("-")[0].split(" ")[0]
-    val cleanInstalled = installedVersion.trimStart('v', 'V').split("-")[0].split(" ")[0]
-
-    if (cleanLatest.equals(cleanInstalled, ignoreCase = true)) return false
-
-    val v1Parts = cleanLatest.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
-    val v2Parts = cleanInstalled.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
+    val v1Parts = normLatest.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
+    val v2Parts = normInstalled.split(".").mapNotNull { it.filter { c -> c.isDigit() }.toIntOrNull() }
 
     if (v1Parts.isNotEmpty() && v2Parts.isNotEmpty()) {
         for (i in 0 until maxOf(v1Parts.size, v2Parts.size)) {
@@ -373,6 +480,7 @@ fun isNewerVersion(latestTag: String, installedVersion: String, installedVersion
             if (part1 > part2) return true
             if (part1 < part2) return false
         }
+        return false
     }
 
     return false

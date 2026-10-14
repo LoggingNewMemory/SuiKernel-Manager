@@ -2,7 +2,7 @@ package kanagawa.yamada.suikernel.manager
 
 data class SuiKernelConfig(
     val anyaThermal: Boolean = true,
-    val yamadaBoost: Boolean = true,
+    val yamadaBoost: Boolean = true,    
     val performanceMode: String = "Balanced",
     val inahoAudio: Boolean = true,
     val tenebrion: Boolean = true,

@@ -3,6 +3,8 @@ package kanagawa.yamada.suikernel.manager
 import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -135,14 +137,20 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     item.copy(
                         id = installed.id,
                         version = installed.version,
-                        status = ModuleStatus.INSTALLED
+                        status = ModuleStatus.INSTALLED,
+                        isBusy = false,
+                        progressText = "",
+                        downloadProgress = 0f
                     )
                 } else {
                     val cachedVer = getCachedModuleVersion(context, item.repo).ifBlank { item.version }
                     item.copy(
                         version = cachedVer,
                         latestVersion = cachedVer.ifBlank { item.latestVersion },
-                        status = ModuleStatus.DOWNLOAD
+                        status = ModuleStatus.DOWNLOAD,
+                        isBusy = false,
+                        progressText = "",
+                        downloadProgress = 0f
                     )
                 }
             }
@@ -204,33 +212,22 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     BackHandler(onBack = {
         if (consoleOutput != null && !isInstalling) {
             consoleOutput = null
+            modulesState = modulesState.map { it.copy(isBusy = false, progressText = "", downloadProgress = 0f) }
+            refreshModules()
         } else if (!isInstalling) {
             onNavigateBack()
         }
     })
 
-    if (consoleOutput != null) {
-        // Installation terminal output modal
-        ModuleInstallPrompt(
-            title = "Module Flasher",
-            output = consoleOutput ?: "",
-            isInstalling = isInstalling,
-            onClose = {
-                consoleOutput = null
-                refreshModules()
-            }
-        )
-        return
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 24.dp)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+        ) {
         // Header
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -358,20 +355,54 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
                             isInstalling = false
                             consoleOutput = (consoleOutput ?: "") + "\n\n--- Finished! Please Reboot if required ---"
+                            modulesState = modulesState.map {
+                                if (it.repo == module.repo) it.copy(isBusy = false, progressText = "", downloadProgress = 0f) else it
+                            }
                             refreshModules()
                         }
                     }
                 )
             }
-        }
+        } // Close LazyColumn
+    } // Close main Column
+
+    // Animated modal for Module Flasher
+    AnimatedVisibility(
+        visible = consoleOutput != null,
+        enter = fadeIn(tween(300)) + slideInVertically(
+            animationSpec = tween(350, easing = FastOutSlowInEasing),
+            initialOffsetY = { it }
+        ),
+        exit = fadeOut(tween(250)) + slideOutVertically(
+            animationSpec = tween(300, easing = FastOutSlowInEasing),
+            targetOffsetY = { it }
+        )
+    ) {
+        ModuleInstallPrompt(
+            title = "Module Flasher",
+            output = consoleOutput ?: "",
+            isInstalling = isInstalling,
+            onClose = {
+                consoleOutput = null
+                modulesState = modulesState.map { it.copy(isBusy = false, progressText = "", downloadProgress = 0f) }
+                refreshModules()
+            }
+        )
     }
-}
+} // Close Box
+} // Close RecomendedModulesScreen
 
 @Composable
 fun ModuleRowItem(
     module: RecomendedModuleItem,
     onActionClick: () -> Unit
 ) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = module.downloadProgress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 250, easing = LinearOutSlowInEasing),
+        label = "DownloadProgress"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -380,16 +411,15 @@ fun ModuleRowItem(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             // Title row
-            if (module.isBusy && module.downloadProgress > 0f) {
-                val progress = module.downloadProgress.coerceIn(0f, 1f)
+            if (module.isBusy && animatedProgress > 0f) {
                 val greenColor = Color(0xFFA1D477)
                 val whiteColor = Color.White
                 
-                // Horizontal brush that transitions from green to white at current progress point
+                // Horizontal brush that transitions from green to white smoothly at current progress point
                 val titleBrush = Brush.horizontalGradient(
                     0.0f to greenColor,
-                    progress to greenColor,
-                    progress to whiteColor,
+                    animatedProgress to greenColor,
+                    animatedProgress to whiteColor,
                     1.0f to whiteColor
                 )
 
@@ -466,43 +496,52 @@ fun ModuleRowItem(
             )
         }
 
-        // Action icon button
+        // Action icon button with smooth morph animation
         IconButton(
             onClick = onActionClick,
             enabled = !module.isBusy,
             modifier = Modifier.size(36.dp)
         ) {
-            if (module.isBusy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp,
-                    color = Color(0xFF26C6DA)
-                )
-            } else {
-                when (module.status) {
-                    ModuleStatus.DOWNLOAD -> {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_download),
-                            contentDescription = "Download ${module.title}",
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                    ModuleStatus.UPDATE -> {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_download_upd),
-                            contentDescription = "Update ${module.title}",
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                    ModuleStatus.INSTALLED -> {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_ok),
-                            contentDescription = "${module.title} Installed",
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(26.dp)
-                        )
+            AnimatedContent(
+                targetState = module.isBusy to module.status,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(220, delayMillis = 40)) + scaleIn(initialScale = 0.75f, animationSpec = tween(220, delayMillis = 40)))
+                        .togetherWith(fadeOut(animationSpec = tween(140)) + scaleOut(targetScale = 0.75f, animationSpec = tween(140)))
+                },
+                label = "ActionIconAnim"
+            ) { (isBusy, status) ->
+                if (isBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = Color(0xFF26C6DA)
+                    )
+                } else {
+                    when (status) {
+                        ModuleStatus.DOWNLOAD -> {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_download),
+                                contentDescription = "Download ${module.title}",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        ModuleStatus.UPDATE -> {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_download_upd),
+                                contentDescription = "Update ${module.title}",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        ModuleStatus.INSTALLED -> {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_ok),
+                                contentDescription = "${module.title} Installed",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
                     }
                 }
             }
