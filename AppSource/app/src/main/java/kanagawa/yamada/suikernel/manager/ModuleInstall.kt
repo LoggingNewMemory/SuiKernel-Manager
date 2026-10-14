@@ -25,6 +25,43 @@ data class DefinitionItem(
     val repo: String
 )
 
+// ----------------- MODULE VERSION CACHE HELPERS -----------------
+
+private const val PREFS_MODULE_CACHE = "module_version_cache"
+
+fun getCachedModuleVersion(context: Context, repo: String): String {
+    return try {
+        context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE)
+            .getString("ver_$repo", "") ?: ""
+    } catch (e: Exception) {
+        ""
+    }
+}
+
+fun getCachedModuleDownloadUrl(context: Context, repo: String): String {
+    return try {
+        context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE)
+            .getString("url_$repo", "") ?: ""
+    } catch (e: Exception) {
+        ""
+    }
+}
+
+fun saveCachedModuleInfo(context: Context, repo: String, version: String, downloadUrl: String = "") {
+    try {
+        val prefs = context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE).edit()
+        if (version.isNotBlank()) {
+            prefs.putString("ver_$repo", version)
+        }
+        if (downloadUrl.isNotBlank()) {
+            prefs.putString("url_$repo", downloadUrl)
+        }
+        prefs.apply()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
 // ----------------- ROOT & GITHUB HELPER FUNCTIONS -----------------
 
 fun fetchInstalledModules(): List<InstalledModuleInfo> {

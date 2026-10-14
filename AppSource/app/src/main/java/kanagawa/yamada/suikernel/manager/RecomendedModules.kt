@@ -108,13 +108,15 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     var modulesState by remember {
         mutableStateOf(
             moduleDefs.map { def ->
+                val cachedVer = getCachedModuleVersion(context, def.repo)
+                val cachedUrl = getCachedModuleDownloadUrl(context, def.repo)
                 RecomendedModuleItem(
                     title = def.title,
                     author = def.author,
                     repo = def.repo,
-                    version = "",
-                    latestVersion = "",
-                    downloadUrl = "",
+                    version = cachedVer,
+                    latestVersion = cachedVer,
+                    downloadUrl = cachedUrl,
                     status = ModuleStatus.DOWNLOAD
                 )
             }
@@ -129,13 +131,17 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             val localChecked = modulesState.map { item ->
                 val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
                 if (installed != null) {
+                    saveCachedModuleInfo(context, item.repo, installed.version)
                     item.copy(
                         id = installed.id,
                         version = installed.version,
                         status = ModuleStatus.INSTALLED
                     )
                 } else {
+                    val cachedVer = getCachedModuleVersion(context, item.repo).ifBlank { item.version }
                     item.copy(
+                        version = cachedVer,
+                        latestVersion = cachedVer.ifBlank { item.latestVersion },
                         status = ModuleStatus.DOWNLOAD
                     )
                 }
@@ -153,12 +159,24 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
                 val (latestTag, downloadUrl) = fetchLatestRelease(item.repo, effectiveUpdateJson)
                 
-                val latest = if (latestTag.isNotBlank()) latestTag else item.latestVersion
+                val latest = if (latestTag.isNotBlank()) {
+                    saveCachedModuleInfo(context, item.repo, latestTag, downloadUrl)
+                    latestTag
+                } else {
+                    item.latestVersion.ifBlank { getCachedModuleVersion(context, item.repo) }
+                }
+
+                val effectiveDownloadUrl = if (downloadUrl.isNotBlank()) {
+                    downloadUrl
+                } else {
+                    item.downloadUrl.ifBlank { getCachedModuleDownloadUrl(context, item.repo) }
+                }
+
                 val displayVersion = installed?.version ?: latest
 
                 val status = when {
                     installed == null -> ModuleStatus.DOWNLOAD
-                    latestTag.isNotBlank() && isNewerVersion(latestTag, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
+                    latest.isNotBlank() && isNewerVersion(latest, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
                     else -> ModuleStatus.INSTALLED
                 }
 
@@ -166,7 +184,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     id = installed?.id ?: item.id,
                     version = displayVersion,
                     latestVersion = latest,
-                    downloadUrl = downloadUrl,
+                    downloadUrl = effectiveDownloadUrl,
                     status = status,
                     isBusy = false,
                     progressText = ""
@@ -427,13 +445,17 @@ fun ModuleRowItem(
             } else if (module.latestVersion.isNotBlank()) {
                 module.latestVersion
             } else {
-                "Checking..."
+                ""
             }
+
+            val versionSuffix = if (subtitleVersion.isNotBlank()) " • $subtitleVersion" else ""
 
             Text(
                 text = buildAnnotatedString {
-                    withStyle(SpanStyle(color = Color.White)) { append("By: ${module.author} • ") }
-                    withStyle(SpanStyle(color = Color(0xFF26C6DA))) { append(subtitleVersion) }
+                    withStyle(SpanStyle(color = Color.White)) { append("By: ${module.author}") }
+                    if (versionSuffix.isNotBlank()) {
+                        withStyle(SpanStyle(color = Color(0xFF26C6DA))) { append(versionSuffix) }
+                    }
                     if (module.isBusy && module.progressText.isNotBlank()) {
                         withStyle(SpanStyle(color = Color(0xFFE05A67))) { append(" [${module.progressText}]") }
                     }
