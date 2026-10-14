@@ -436,3 +436,11 @@ fun flashModuleZip(zipFile: File, onLine: (String) -> Unit) {
         onLine("Error executing ksud: ${e.message}")
     }
 }
+
+fun rebootDevice() {
+    try {
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "/system/bin/svc power reboot || /system/bin/reboot"))
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
