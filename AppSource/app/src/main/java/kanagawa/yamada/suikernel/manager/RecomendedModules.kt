@@ -61,6 +61,7 @@ data class RecomendedModuleItem(
     val title: String,
     val author: String,
     val repo: String,
+    val platform: HostPlatform = HostPlatform.GITHUB,
     val version: String = "",
     val latestVersion: String = "",
     val downloadUrl: String = "",
@@ -83,32 +84,38 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             DefinitionItem(
                 title = "Brene SUSFS",
                 author = "rrr333nnn333",
-                repo = "rrr333nnn333/BRENE"
+                repo = "rrr333nnn333/BRENE",
+                platform = HostPlatform.GITHUB
             ),
             DefinitionItem(
                 title = "BreZygisk",
                 author = "rrr333nnn333",
-                repo = "rrr333nnn333/BreZygisk"
+                repo = "rrr333nnn333/BreZygisk",
+                platform = HostPlatform.GITHUB
             ),
             DefinitionItem(
                 title = "BreWheel",
                 author = "rrr333nnn333",
-                repo = "rrr333nnn333/BreWheel"
+                repo = "rrr333nnn333/BreWheel",
+                platform = HostPlatform.GITHUB
             ),
             DefinitionItem(
                 title = "Vector",
                 author = "JingMatrix",
-                repo = "JingMatrix/Vector"
+                repo = "JingMatrix/Vector",
+                platform = HostPlatform.GITHUB
             ),
             DefinitionItem(
                 title = "Always Strong",
                 author = "Evokerr",
-                repo = "gitlab:Evokerr/AlwaysStrong"
+                repo = "Evokerr/AlwaysStrong",
+                platform = HostPlatform.GITLAB
             ),
             DefinitionItem(
                 title = "NoMount",
                 author = "maxsteeel",
-                repo = "maxsteeel/nomount"
+                repo = "maxsteeel/nomount",
+                platform = HostPlatform.GITHUB
             )
         )
     }
@@ -122,6 +129,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     title = def.title,
                     author = def.author,
                     repo = def.repo,
+                    platform = def.platform,
                     version = cachedVer,
                     latestVersion = cachedVer,
                     downloadUrl = cachedUrl,
@@ -194,7 +202,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
                     val effectiveUpdateJson = installed?.updateJson?.ifBlank { null }
 
-                    val (latestTag, downloadUrl) = fetchLatestRelease(item.repo, effectiveUpdateJson)
+                    val (latestTag, downloadUrl) = fetchLatestRelease(item.repo, item.platform, effectiveUpdateJson)
                     
                     val latest = if (latestTag.isNotBlank()) {
                         saveCachedModuleInfo(context, item.repo, latestTag, downloadUrl)
@@ -390,7 +398,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                             var targetUrl = module.downloadUrl
                             if (targetUrl.isBlank()) {
                                 val (latestTag, url) = withContext(Dispatchers.IO) {
-                                    fetchLatestRelease(module.repo)
+                                    fetchLatestRelease(module.repo, module.platform)
                                 }
                                 if (url.isNotBlank()) {
                                     targetUrl = url

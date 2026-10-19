@@ -20,10 +20,16 @@ data class InstalledModuleInfo(
     val updateJson: String = ""
 )
 
+enum class HostPlatform {
+    GITHUB,
+    GITLAB
+}
+
 data class DefinitionItem(
     val title: String,
     val author: String,
-    val repo: String
+    val repo: String,
+    val platform: HostPlatform = HostPlatform.GITHUB
 )
 
 // ----------------- MODULE VERSION CACHE HELPERS -----------------
@@ -255,31 +261,206 @@ fun selectBestZip(urls: List<String>): String? {
     return nonArchive.first()
 }
 
-fun fetchLatestRelease(
-    repo: String,
-    installedUpdateJson: String? = null
-): Pair<String, String> {
-    val isGitLab = repo.startsWith("gitlab:", ignoreCase = true) ||
-            repo.contains("gitlab.com", ignoreCase = true)
-    val cleanRepo = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+fun buildCheckUrl(repo: String, platform: HostPlatform): String {
+    val clean = repo.removePrefix("gitlab:").removePrefix("github:").trim()
         .removePrefix("https://gitlab.com/").removePrefix("https://github.com/").trimEnd('/')
+    return when (platform) {
+        HostPlatform.GITHUB -> "https://github.com/$clean/releases/latest"
+        HostPlatform.GITLAB -> "https://gitlab.com/$clean/-/releases/permalink/latest"
+    }
+}
 
-    if (isGitLab) {
-        val gitlabResult = fetchGitLabReleaseViaApi(cleanRepo)
-        if (gitlabResult != null && gitlabResult.second.isNotBlank()) {
-            return gitlabResult
+fun extractVersionFromLocation(locationHeader: String, platform: HostPlatform): String {
+    val target = locationHeader.substringBefore("?").substringBefore("#").trimEnd('/')
+    return when (platform) {
+        HostPlatform.GITHUB -> target.substringAfterLast("/tag/")
+        HostPlatform.GITLAB -> target.substringAfterLast("/releases/")
+    }
+}
+
+fun fetchLatestTagViaHead(repo: String, platform: HostPlatform): String? {
+    val checkUrl = buildCheckUrl(repo, platform)
+    var tag: String? = null
+
+    try {
+        val conn = URL(checkUrl).openConnection() as HttpURLConnection
+        conn.requestMethod = "HEAD"
+        conn.instanceFollowRedirects = false
+        conn.connectTimeout = 3500
+        conn.readTimeout = 3500
+        conn.setRequestProperty("User-Agent", "SuiKernelManager")
+        val code = conn.responseCode
+        val location = conn.getHeaderField("Location")
+        conn.disconnect()
+
+        if ((code == 301 || code == 302 || code == 307 || code == 308) && !location.isNullOrBlank()) {
+            val t = extractVersionFromLocation(location, platform)
+            if (t.isNotBlank() && !t.contains("/") && !t.startsWith("http")) {
+                tag = t
+            }
+        }
+    } catch (e: Exception) {
+        // Fall back to curl
+    }
+
+    if (tag.isNullOrBlank()) {
+        try {
+            val cmd = "/system/bin/curl -s -I -k -A 'SuiKernelManager' --connect-timeout 4 '$checkUrl'"
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val lines = process.inputStream.bufferedReader().readLines()
+            process.waitFor()
+
+            for (line in lines) {
+                if (line.trim().startsWith("location:", ignoreCase = true)) {
+                    val loc = line.substringAfter(":").trim()
+                    val t = extractVersionFromLocation(loc, platform)
+                    if (t.isNotBlank() && !t.contains("/") && !t.startsWith("http")) {
+                        tag = t
+                        break
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore
         }
     }
 
-    // 1. Try update.json first (installed updateJson -> main/update.json -> master/update.json)
+    return tag?.let { resolveCleanVersion(it) }
+}
+
+fun fetchVersionFromModuleProp(repo: String, platform: HostPlatform): String? {
+    val clean = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+        .removePrefix("https://gitlab.com/").removePrefix("https://github.com/").trimEnd('/')
+
+    val candidateUrls = when (platform) {
+        HostPlatform.GITLAB -> listOf(
+            "https://gitlab.com/$clean/-/raw/main/module.prop",
+            "https://gitlab.com/$clean/-/raw/main/module/module.prop",
+            "https://gitlab.com/$clean/-/raw/master/module.prop",
+            "https://gitlab.com/$clean/-/raw/master/module/module.prop"
+        )
+        HostPlatform.GITHUB -> listOf(
+            "https://raw.githubusercontent.com/$clean/main/module.prop",
+            "https://raw.githubusercontent.com/$clean/main/module/module.prop",
+            "https://raw.githubusercontent.com/$clean/master/module.prop",
+            "https://raw.githubusercontent.com/$clean/master/module/module.prop"
+        )
+    }
+
+    for (url in candidateUrls) {
+        var text: String? = null
+        try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
+            conn.setRequestProperty("User-Agent", "SuiKernelManager")
+            if (conn.responseCode == 200) {
+                text = conn.inputStream.bufferedReader().use { it.readText() }
+            }
+        } catch (e: Exception) {
+            // Fall back to curl
+        }
+
+        if (text.isNullOrBlank()) {
+            try {
+                val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 4 '$url'"
+                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                val out = proc.inputStream.bufferedReader().use { it.readText() }.trim()
+                proc.waitFor()
+                if (out.contains("version=")) {
+                    text = out
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+
+        if (text != null && text.contains("version=")) {
+            val ver = text.lines().firstOrNull { it.trim().startsWith("version=") }
+                ?.substringAfter("version=")?.trim()
+            if (!ver.isNullOrBlank()) {
+                return resolveCleanVersion(ver)
+            }
+        }
+    }
+
+    return null
+}
+
+private fun fetchGitHubZipAssets(assetUrl: String): List<String> {
+    var html = ""
+    try {
+        val conn = URL(assetUrl).openConnection() as HttpURLConnection
+        conn.connectTimeout = 3500
+        conn.readTimeout = 3500
+        conn.setRequestProperty("User-Agent", "SuiKernelManager")
+        if (conn.responseCode == 200) {
+            html = conn.inputStream.bufferedReader().use { it.readText() }
+        }
+    } catch (e: Exception) {
+        // Fall back to curl
+    }
+
+    if (html.isBlank()) {
+        try {
+            val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 4 '$assetUrl'"
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            html = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
+    return """href="(/[^"]+/releases/download/[^"]+\.zip)"""".toRegex()
+        .findAll(html)
+        .map { "https://github.com" + it.groupValues[1] }
+        .toList()
+}
+
+fun fetchLatestRelease(
+    repo: String,
+    platform: HostPlatform = HostPlatform.GITHUB,
+    installedUpdateJson: String? = null
+): Pair<String, String> {
+    val cleanRepo = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+        .removePrefix("https://gitlab.com/").removePrefix("https://github.com/").trimEnd('/')
+
+    val effectivePlatform = if (repo.startsWith("gitlab:", ignoreCase = true) || repo.contains("gitlab.com", ignoreCase = true)) {
+        HostPlatform.GITLAB
+    } else {
+        platform
+    }
+
+    // 1. FAST PATH: HTTP HEAD Redirect trick (takes ~100-200ms, 0 payload)
+    val headTag = fetchLatestTagViaHead(cleanRepo, effectivePlatform)
+
+    // For GitLab: query permalink/latest directly to get the assets / package links
+    if (effectivePlatform == HostPlatform.GITLAB) {
+        val glResult = fetchGitLabReleaseViaApi(cleanRepo)
+        if (glResult != null && glResult.second.isNotBlank()) {
+            return glResult
+        }
+        if (!headTag.isNullOrBlank()) {
+            return Pair(headTag, "")
+        }
+    }
+
+    // 2. Try update.json first if available
     val candidateUpdateUrls = mutableListOf<String>()
     if (!installedUpdateJson.isNullOrBlank()) {
         candidateUpdateUrls.add(installedUpdateJson)
     }
-    candidateUpdateUrls.add("https://raw.githubusercontent.com/$cleanRepo/main/update.json")
-    candidateUpdateUrls.add("https://raw.githubusercontent.com/$cleanRepo/master/update.json")
-    candidateUpdateUrls.add("https://gitlab.com/$cleanRepo/-/raw/main/update.json")
-    candidateUpdateUrls.add("https://gitlab.com/$cleanRepo/-/raw/master/update.json")
+    when (effectivePlatform) {
+        HostPlatform.GITHUB -> {
+            candidateUpdateUrls.add("https://raw.githubusercontent.com/$cleanRepo/main/update.json")
+            candidateUpdateUrls.add("https://raw.githubusercontent.com/$cleanRepo/master/update.json")
+        }
+        HostPlatform.GITLAB -> {
+            candidateUpdateUrls.add("https://gitlab.com/$cleanRepo/-/raw/main/update.json")
+            candidateUpdateUrls.add("https://gitlab.com/$cleanRepo/-/raw/master/update.json")
+        }
+    }
 
     for (uUrl in candidateUpdateUrls) {
         val updateInfo = fetchUpdateJson(uUrl)
@@ -288,28 +469,46 @@ fun fetchLatestRelease(
         }
     }
 
-    // 2. Try GitHub Releases web scraping (redirect/expanded_assets like KernelSU-Next, immune to API rate limits)
-    val webResult = fetchGitHubReleaseViaWeb(cleanRepo)
-    if (webResult != null && webResult.second.isNotBlank()) {
-        return webResult
+    // 3. For GitHub: if headTag was found, query expanded_assets directly for that tag
+    if (effectivePlatform == HostPlatform.GITHUB && !headTag.isNullOrBlank()) {
+        val assetUrl = "https://github.com/$cleanRepo/releases/expanded_assets/$headTag"
+        val zipMatches = fetchGitHubZipAssets(assetUrl)
+        val bestZip = selectBestZip(zipMatches)
+        if (bestZip != null) {
+            return Pair(headTag, bestZip)
+        }
+        return Pair(headTag, "")
     }
 
-    // 3. Fall back to GitHub Releases API
-    val apiResult = fetchGitHubReleaseViaApi(cleanRepo)
-    if (apiResult != null && apiResult.second.isNotBlank()) {
-        return apiResult
-    }
-
-    // 4. Fall back to GitLab Releases API if not checked yet
-    if (!isGitLab) {
-        val gitlabResult = fetchGitLabReleaseViaApi(cleanRepo)
-        if (gitlabResult != null && gitlabResult.second.isNotBlank()) {
-            return gitlabResult
+    // 4. Try GitHub Releases web scraping
+    if (effectivePlatform == HostPlatform.GITHUB) {
+        val webResult = fetchGitHubReleaseViaWeb(cleanRepo)
+        if (webResult != null && webResult.second.isNotBlank()) {
+            return webResult
         }
     }
 
-    return Pair("", "")
+    // 5. Fallback: Raw module.prop
+    val propVer = fetchVersionFromModuleProp(cleanRepo, effectivePlatform)
+    if (!propVer.isNullOrBlank()) {
+        return Pair(propVer, "")
+    }
+
+    // 6. Last resort: GitHub Releases API
+    if (effectivePlatform == HostPlatform.GITHUB) {
+        val apiResult = fetchGitHubReleaseViaApi(cleanRepo)
+        if (apiResult != null && apiResult.second.isNotBlank()) {
+            return apiResult
+        }
+    }
+
+    return Pair(headTag ?: "", "")
 }
+
+fun fetchLatestRelease(
+    repo: String,
+    installedUpdateJson: String?
+): Pair<String, String> = fetchLatestRelease(repo, HostPlatform.GITHUB, installedUpdateJson)
 
 fun resolveCleanVersion(rawTag: String, releaseTitle: String = "", zipUrl: String = ""): String {
     val tag = rawTag.trim()
@@ -505,12 +704,12 @@ private fun fetchGitLabReleaseViaApi(repo: String): Pair<String, String>? {
 
     var jsonStr = ""
     try {
-        val url = URL("https://gitlab.com/api/v4/projects/$encodedPath/releases")
+        val url = URL("https://gitlab.com/api/v4/projects/$encodedPath/releases/permalink/latest")
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("User-Agent", "SuiKernelManager")
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
+        conn.connectTimeout = 4000
+        conn.readTimeout = 4000
 
         if (conn.responseCode == 200) {
             jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
@@ -521,11 +720,11 @@ private fun fetchGitLabReleaseViaApi(repo: String): Pair<String, String>? {
 
     if (jsonStr.isBlank()) {
         try {
-            val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 8 'https://gitlab.com/api/v4/projects/$encodedPath/releases'"
+            val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 6 'https://gitlab.com/api/v4/projects/$encodedPath/releases/permalink/latest'"
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
             val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
-            if (text.startsWith("[") && text.endsWith("]")) {
+            if (text.startsWith("{") && text.endsWith("}")) {
                 jsonStr = text
             }
         } catch (e: Exception) {
@@ -533,12 +732,34 @@ private fun fetchGitLabReleaseViaApi(repo: String): Pair<String, String>? {
         }
     }
 
+    if (jsonStr.isBlank()) {
+        try {
+            val url = URL("https://gitlab.com/api/v4/projects/$encodedPath/releases")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "SuiKernelManager")
+            conn.connectTimeout = 4000
+            conn.readTimeout = 4000
+
+            if (conn.responseCode == 200) {
+                jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
     if (jsonStr.isBlank()) return null
 
     return try {
-        val array = JSONArray(jsonStr)
-        if (array.length() == 0) return null
-        val release = array.getJSONObject(0)
+        val release = if (jsonStr.trim().startsWith("[")) {
+            val array = JSONArray(jsonStr)
+            if (array.length() == 0) return null
+            array.getJSONObject(0)
+        } else {
+            JSONObject(jsonStr)
+        }
+
         val tag = release.optString("tag_name", "")
         val releaseName = release.optString("name", "")
         val assets = release.optJSONObject("assets")
