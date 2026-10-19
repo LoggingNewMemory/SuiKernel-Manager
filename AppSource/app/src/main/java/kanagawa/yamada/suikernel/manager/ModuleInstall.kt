@@ -62,6 +62,25 @@ fun saveCachedModuleInfo(context: Context, repo: String, version: String, downlo
     }
 }
 
+fun getLastUpdateCheckTime(context: Context): Long {
+    return try {
+        context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE)
+            .getLong("last_check_timestamp", 0L)
+    } catch (e: Exception) {
+        0L
+    }
+}
+
+fun setLastUpdateCheckTime(context: Context, timestamp: Long = System.currentTimeMillis()) {
+    try {
+        context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE).edit()
+            .putLong("last_check_timestamp", timestamp)
+            .apply()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
 // ----------------- ROOT & GITHUB HELPER FUNCTIONS -----------------
 
 fun fetchInstalledModules(): List<InstalledModuleInfo> {

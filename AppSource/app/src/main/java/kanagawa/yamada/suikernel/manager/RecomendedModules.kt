@@ -19,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.SpanStyle
@@ -29,10 +31,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kanagawa.yamada.suikernel.manager.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -126,21 +131,29 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
         )
     }
 
-    fun refreshModules() {
+    var isCheckingUpdates by remember { mutableStateOf(false) }
+
+    fun loadLocalModules() {
         coroutineScope.launch(Dispatchers.IO) {
             val pendingReboot = getPendingRebootRepos(context)
 
-            // Phase 1: FAST LOCAL CHECK
-            // Immediately query ksud module list to mark installed modules with "OK" (no network delay)
+            // Fast local check: query installed modules via root & match with cached metadata
             val installedList = fetchInstalledModules()
             val localChecked = modulesState.map { item ->
                 val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
                 if (installed != null) {
-                    saveCachedModuleInfo(context, item.repo, installed.version)
-                    val status = if (pendingReboot.contains(item.repo)) ModuleStatus.REBOOT else ModuleStatus.INSTALLED
+                    val cachedLatestVer = getCachedModuleVersion(context, item.repo)
+                    val cachedDownloadUrl = getCachedModuleDownloadUrl(context, item.repo)
+                    val status = when {
+                        pendingReboot.contains(item.repo) -> ModuleStatus.REBOOT
+                        cachedLatestVer.isNotBlank() && isNewerVersion(cachedLatestVer, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
+                        else -> ModuleStatus.INSTALLED
+                    }
                     item.copy(
                         id = installed.id,
                         version = installed.version,
+                        latestVersion = cachedLatestVer.ifBlank { installed.version },
+                        downloadUrl = cachedDownloadUrl.ifBlank { item.downloadUrl },
                         status = status,
                         isBusy = false,
                         progressText = "",
@@ -148,9 +161,11 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     )
                 } else {
                     val cachedVer = getCachedModuleVersion(context, item.repo).ifBlank { item.version }
+                    val cachedDownloadUrl = getCachedModuleDownloadUrl(context, item.repo)
                     item.copy(
                         version = cachedVer,
                         latestVersion = cachedVer.ifBlank { item.latestVersion },
+                        downloadUrl = cachedDownloadUrl.ifBlank { item.downloadUrl },
                         status = ModuleStatus.DOWNLOAD,
                         isBusy = false,
                         progressText = "",
@@ -162,63 +177,91 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             withContext(Dispatchers.Main) {
                 modulesState = localChecked
             }
+        }
+    }
 
-            // Phase 2: ASYNC REMOTE CHECK
-            // Check update.json first, then fall back to GitHub releases in background
-            val updated = localChecked.map { item ->
-                val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
-                val effectiveUpdateJson = installed?.updateJson?.ifBlank { null }
+    fun checkForRemoteUpdates(isManual: Boolean = true) {
+        if (isCheckingUpdates) return
+        isCheckingUpdates = true
 
-                val (latestTag, downloadUrl) = fetchLatestRelease(item.repo, effectiveUpdateJson)
-                
-                val latest = if (latestTag.isNotBlank()) {
-                    saveCachedModuleInfo(context, item.repo, latestTag, downloadUrl)
-                    latestTag
-                } else {
-                    item.latestVersion.ifBlank { getCachedModuleVersion(context, item.repo) }
+        coroutineScope.launch(Dispatchers.IO) {
+            val pendingReboot = getPendingRebootRepos(context)
+            val installedList = fetchInstalledModules()
+
+            // Run remote checks in PARALLEL using async/awaitAll for blazing fast updates
+            val updateDeferreds = modulesState.map { item ->
+                async {
+                    val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
+                    val effectiveUpdateJson = installed?.updateJson?.ifBlank { null }
+
+                    val (latestTag, downloadUrl) = fetchLatestRelease(item.repo, effectiveUpdateJson)
+                    
+                    val latest = if (latestTag.isNotBlank()) {
+                        saveCachedModuleInfo(context, item.repo, latestTag, downloadUrl)
+                        latestTag
+                    } else {
+                        item.latestVersion.ifBlank { getCachedModuleVersion(context, item.repo) }
+                    }
+
+                    val effectiveDownloadUrl = if (downloadUrl.isNotBlank()) {
+                        downloadUrl
+                    } else {
+                        item.downloadUrl.ifBlank { getCachedModuleDownloadUrl(context, item.repo) }
+                    }
+
+                    val displayVersion = installed?.version ?: latest
+
+                    val status = when {
+                        pendingReboot.contains(item.repo) -> ModuleStatus.REBOOT
+                        installed == null -> ModuleStatus.DOWNLOAD
+                        latest.isNotBlank() && isNewerVersion(latest, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
+                        else -> ModuleStatus.INSTALLED
+                    }
+
+                    item.copy(
+                        id = installed?.id ?: item.id,
+                        version = displayVersion,
+                        latestVersion = latest,
+                        downloadUrl = effectiveDownloadUrl,
+                        status = status,
+                        isBusy = false,
+                        progressText = ""
+                    )
                 }
-
-                val effectiveDownloadUrl = if (downloadUrl.isNotBlank()) {
-                    downloadUrl
-                } else {
-                    item.downloadUrl.ifBlank { getCachedModuleDownloadUrl(context, item.repo) }
-                }
-
-                val displayVersion = installed?.version ?: latest
-
-                val status = when {
-                    pendingReboot.contains(item.repo) -> ModuleStatus.REBOOT
-                    installed == null -> ModuleStatus.DOWNLOAD
-                    latest.isNotBlank() && isNewerVersion(latest, installed.version, installed.versionCode) -> ModuleStatus.UPDATE
-                    else -> ModuleStatus.INSTALLED
-                }
-
-                item.copy(
-                    id = installed?.id ?: item.id,
-                    version = displayVersion,
-                    latestVersion = latest,
-                    downloadUrl = effectiveDownloadUrl,
-                    status = status,
-                    isBusy = false,
-                    progressText = ""
-                )
             }
+
+            val updated = updateDeferreds.awaitAll()
+            setLastUpdateCheckTime(context)
 
             withContext(Dispatchers.Main) {
                 modulesState = updated
+                isCheckingUpdates = false
+                if (isManual) {
+                    val updatesCount = updated.count { it.status == ModuleStatus.UPDATE }
+                    if (updatesCount > 0) {
+                        Toast.makeText(context, "$updatesCount update${if (updatesCount > 1) "s" else ""} available", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "All modules are up to date", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
     }
 
     LaunchedEffect(Unit) {
-        refreshModules()
+        loadLocalModules()
+        val lastCheck = getLastUpdateCheckTime(context)
+        val now = System.currentTimeMillis()
+        if (lastCheck == 0L || (now - lastCheck > 3600_000L)) {
+            checkForRemoteUpdates(isManual = false)
+        }
     }
 
     BackHandler(onBack = {
         if (consoleOutput != null && !isInstalling) {
             consoleOutput = null
             modulesState = modulesState.map { it.copy(isBusy = false, progressText = "", downloadProgress = 0f) }
-            refreshModules()
+            loadLocalModules()
         } else if (!isInstalling) {
             onNavigateBack()
         }
@@ -238,13 +281,19 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            var headerWidthDp by remember { mutableStateOf<Dp?>(null) }
+            val density = LocalDensity.current
+
             Text(
                 text = "Recomended Modules",
                 fontFamily = GoogleSansFlex,
                 fontWeight = FontWeight.Medium,
                 fontSize = 28.sp,
                 color = Color.White,
-                textDecoration = TextDecoration.Underline
+                textDecoration = TextDecoration.Underline,
+                modifier = Modifier.onGloballyPositioned { coordinates ->
+                    headerWidthDp = with(density) { coordinates.size.width.toDp() }
+                }
             )
             
             Spacer(modifier = Modifier.height(8.dp))
@@ -260,9 +309,60 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 fontWeight = FontWeight.Light,
                 fontSize = 14.sp
             )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Check for Updates Button
+            Surface(
+                onClick = { checkForRemoteUpdates() },
+                enabled = !isCheckingUpdates && !isInstalling,
+                shape = RoundedCornerShape(50),
+                color = PillBackground,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF33383F)),
+                modifier = Modifier
+                    .width(headerWidthDp ?: 275.dp)
+                    .height(36.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (isCheckingUpdates) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = PrimaryCyan
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Checking updates...",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    } else {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_restart),
+                            contentDescription = "Check for Updates",
+                            tint = PrimaryCyan,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Check for Updates",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Module list
         LazyColumn(
@@ -371,7 +471,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                             modulesState = modulesState.map {
                                 if (it.repo == module.repo) it.copy(status = ModuleStatus.REBOOT, isBusy = false, progressText = "", downloadProgress = 0f) else it
                             }
-                            refreshModules()
+                            loadLocalModules()
                         }
                     }
                 )
@@ -398,7 +498,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             onClose = {
                 consoleOutput = null
                 modulesState = modulesState.map { it.copy(isBusy = false, progressText = "", downloadProgress = 0f) }
-                refreshModules()
+                loadLocalModules()
             }
         )
     }
