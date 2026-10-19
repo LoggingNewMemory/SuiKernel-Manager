@@ -31,6 +31,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.widget.Toast
+import androidx.compose.ui.draw.alpha
 
 object WallpaperCache {
     val bitmap = mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
@@ -72,25 +74,37 @@ fun DashboardScreen(
 
     val kernelInfo = remember {
         try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/version"))
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-            val output = reader.readLine()
-            process.waitFor()
+            val hasRoot = checkRootAccess()
+            var output: String? = null
+            if (hasRoot) {
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/version"))
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+                output = reader.readLine()
+                process.waitFor()
+            }
 
             val realKernelString = output?.split(" ")?.getOrNull(2) ?: ""
-            val isSuiKernel = realKernelString.contains("SuiKernel", ignoreCase = true)
-            val isKsuNext = realKernelString.contains("KernelSU-Next", ignoreCase = true)
-            
+            val isSuiKernel = output?.contains("SuiKernel", ignoreCase = true) == true
+            val isKsuNext = output?.contains("KernelSU-Next", ignoreCase = true) == true
             val versionPrefix = if (realKernelString.isNotEmpty()) realKernelString.split("-")[0] else "Unknown"
-            val hasRoot = checkRootAccess()
-            Pair(versionPrefix, isSuiKernel && isKsuNext && hasRoot)
+
+            val isOfficial = hasRoot && isSuiKernel && isKsuNext
+            val rejectReason = when {
+                !hasRoot -> "No Root"
+                !isSuiKernel -> "Not SuiKernel"
+                !isKsuNext -> "Not KernelSU-Next"
+                else -> ""
+            }
+
+            Triple(versionPrefix, isOfficial, rejectReason)
         } catch (e: Exception) {
-            Pair("Unknown", false)
+            Triple("Unknown", false, "Unknown Error")
         }
     }
     
     val kernelVersion = kernelInfo.first
     val isOfficial = kernelInfo.second
+    val rejectReason = kernelInfo.third
 
     val deviceName = remember {
         var vendorModel = ""
@@ -384,97 +398,155 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Recommended Modules
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onNavigateToRecomendedModules() },
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = CardDark)
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+        if (isOfficial) {
+            // Recommended Modules
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToRecomendedModules() },
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Recomended Modules",
-                        fontFamily = GoogleSansFlex,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 16.sp,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = buildAnnotatedString {
-                            withStyle(style = SpanStyle(color = AccentRed)) {
-                                append("Enhance")
-                            }
-                            append(" Your ")
-                            withStyle(style = SpanStyle(color = PrimaryCyan)) {
-                                append("SuiKernel")
-                            }
-                            append(" Experience")
-                        },
-                        fontFamily = GoogleSansFlex,
-                        fontWeight = FontWeight.Light,
-                        fontSize = 12.sp,
-                        color = TextPrimary
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Recomended Modules",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(style = SpanStyle(color = AccentRed)) {
+                                    append("Enhance")
+                                }
+                                append(" Your ")
+                                withStyle(style = SpanStyle(color = PrimaryCyan)) {
+                                    append("SuiKernel")
+                                }
+                                append(" Experience")
+                            },
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Light,
+                            fontSize = 12.sp,
+                            color = TextPrimary
+                        )
+                    }
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
+                        contentDescription = "Right Arrow",
+                        tint = TextSecondary,
+                        modifier = Modifier.height(16.dp)
                     )
                 }
-                Icon(
-                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
-                    contentDescription = "Right Arrow",
-                    tint = TextSecondary,
-                    modifier = Modifier.height(16.dp)
-                )
             }
-        }
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-        // SuiKernel Settings
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onNavigateToSettings() },
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = CardDark)
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // SuiKernel Settings
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToSettings() },
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "SuiKernel Settings",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(style = SpanStyle(color = AccentRed)) {
+                                    append("Customize")
+                                }
+                                append(" ")
+                                withStyle(style = SpanStyle(color = PrimaryCyan)) {
+                                    append("SuiKernel")
+                                }
+                                append(" Built-In Driver")
+                            },
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Light,
+                            fontSize = 12.sp,
+                            color = TextPrimary
+                        )
+                    }
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
+                        contentDescription = "Right Arrow",
+                        tint = TextSecondary,
+                        modifier = Modifier.height(16.dp)
+                    )
+                }
+            }
+        } else {
+            // Rejection Banner Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    color = Color(0xFFE05A67),
+                                    shape = RoundedCornerShape(50)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "REJECTED - $rejectReason",
+                                fontFamily = GoogleSansFlex,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
                     Text(
-                        text = "SuiKernel Settings",
+                        text = "Modules & Settings Unavailable",
                         fontFamily = GoogleSansFlex,
                         fontWeight = FontWeight.Medium,
                         fontSize = 16.sp,
                         color = TextPrimary
                     )
+
                     Text(
-                        text = buildAnnotatedString {
-                            withStyle(style = SpanStyle(color = AccentRed)) {
-                                append("Customize")
-                            }
-                            append(" ")
-                            withStyle(style = SpanStyle(color = PrimaryCyan)) {
-                                append("SuiKernel")
-                            }
-                            append(" Built-In Driver")
+                        text = when (rejectReason) {
+                            "Not SuiKernel" -> "SuiKernel manager only works with SuiKernel! Why you think SuiKernel Manager can work with other kernels?!"
+                            "Not KernelSU-Next" -> "SuiKernel manager only works with KernelSU Next variant, if you use Vanilla. It just doesn't works, thanks."
+                            "No Root" -> "You think you use the SuiKernel that already supports SuiKernel Manager huh? Nah it's not. Get out"
+                            else -> "This device does not meet the requirements to access SuiKernel modules and settings."
                         },
                         fontFamily = GoogleSansFlex,
-                        fontWeight = FontWeight.Light,
-                        fontSize = 12.sp,
-                        color = TextPrimary
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                        lineHeight = 18.sp
                     )
                 }
-                Icon(
-                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
-                    contentDescription = "Right Arrow",
-                    tint = TextSecondary,
-                    modifier = Modifier.height(16.dp)
-                )
             }
         }
         
