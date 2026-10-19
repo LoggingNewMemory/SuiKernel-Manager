@@ -1,10 +1,16 @@
 # SuiKernel-Manager Specific
 Designs/OUT/
 
-# Built application files
+# Built application files & release outputs
 *.apk
 *.ap_
 *.aab
+**/release/
+
+# Keystores and signing keys
+*.jks
+*.keystore
+*.p12
 
 # Local configuration file (sdk path, etc)
 local.properties
