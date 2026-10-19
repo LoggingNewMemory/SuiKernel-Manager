@@ -102,8 +102,8 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             ),
             DefinitionItem(
                 title = "Always Strong",
-                author = "evoker0",
-                repo = "evoker0/AlwaysStrong"
+                author = "Evokerr",
+                repo = "gitlab:Evokerr/AlwaysStrong"
             ),
             DefinitionItem(
                 title = "NoMount",
@@ -250,11 +250,6 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     LaunchedEffect(Unit) {
         loadLocalModules()
-        val lastCheck = getLastUpdateCheckTime(context)
-        val now = System.currentTimeMillis()
-        if (lastCheck == 0L || (now - lastCheck > 3600_000L)) {
-            checkForRemoteUpdates(isManual = false)
-        }
     }
 
     BackHandler(onBack = {

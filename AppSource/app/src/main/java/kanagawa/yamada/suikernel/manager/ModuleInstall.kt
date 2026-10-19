@@ -8,6 +8,7 @@ import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 data class InstalledModuleInfo(
     val id: String,
@@ -31,8 +32,17 @@ private const val PREFS_MODULE_CACHE = "module_version_cache"
 
 fun getCachedModuleVersion(context: Context, repo: String): String {
     return try {
-        context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE)
-            .getString("ver_$repo", "") ?: ""
+        val prefs = context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE)
+        val ver = prefs.getString("ver_$repo", "") ?: ""
+        if (ver.isNotBlank()) return ver
+        val clean = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+        val altVer = prefs.getString("ver_$clean", "") ?: ""
+        if (altVer.isNotBlank()) return altVer
+        if (clean.contains("AlwaysStrong", ignoreCase = true)) {
+            prefs.getString("ver_evoker0/AlwaysStrong", "") ?: ""
+        } else {
+            ""
+        }
     } catch (e: Exception) {
         ""
     }
@@ -40,8 +50,17 @@ fun getCachedModuleVersion(context: Context, repo: String): String {
 
 fun getCachedModuleDownloadUrl(context: Context, repo: String): String {
     return try {
-        context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE)
-            .getString("url_$repo", "") ?: ""
+        val prefs = context.getSharedPreferences(PREFS_MODULE_CACHE, Context.MODE_PRIVATE)
+        val url = prefs.getString("url_$repo", "") ?: ""
+        if (url.isNotBlank()) return url
+        val clean = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+        val altUrl = prefs.getString("url_$clean", "") ?: ""
+        if (altUrl.isNotBlank()) return altUrl
+        if (clean.contains("AlwaysStrong", ignoreCase = true)) {
+            prefs.getString("url_evoker0/AlwaysStrong", "") ?: ""
+        } else {
+            ""
+        }
     } catch (e: Exception) {
         ""
     }
@@ -126,7 +145,8 @@ fun findInstalledModule(
 ): InstalledModuleInfo? {
     val cleanTitle = title.trim().lowercase()
     val cleanAuthor = author.trim().lowercase()
-    val repoProject = repo.substringAfter("/").trim().lowercase()
+    val cleanRepo = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+    val repoProject = cleanRepo.substringAfterLast("/").trim().lowercase()
 
     return installedList.firstOrNull { inst ->
         val instName = inst.name.trim().lowercase()
@@ -134,12 +154,17 @@ fun findInstalledModule(
         val instAuthor = inst.author.trim().lowercase()
 
         // 1. Direct updateJson check
-        if (inst.updateJson.isNotBlank() && inst.updateJson.contains(repo, ignoreCase = true)) {
+        if (inst.updateJson.isNotBlank() && (
+            inst.updateJson.contains(repo, ignoreCase = true) ||
+            inst.updateJson.contains(cleanRepo, ignoreCase = true) ||
+            inst.updateJson.contains(repoProject, ignoreCase = true)
+        )) {
             return@firstOrNull true
         }
 
         // 2. Name / title match
         val nameMatch = instName == cleanTitle ||
+                instName == cleanTitle.replace(" ", "") ||
                 (instName.isNotBlank() && cleanTitle.contains(instName)) ||
                 (cleanTitle.isNotBlank() && instName.contains(cleanTitle))
 
@@ -153,7 +178,8 @@ fun findInstalledModule(
         val authorMatch = cleanAuthor.isNotBlank() && (
                 instAuthor.contains(cleanAuthor) ||
                 cleanAuthor.contains(instAuthor) ||
-                inst.updateJson.contains(cleanAuthor, ignoreCase = true)
+                inst.updateJson.contains(cleanAuthor, ignoreCase = true) ||
+                (cleanAuthor.contains("evoker") && instAuthor.contains("evoker"))
         )
 
         (nameMatch && (authorMatch || instAuthor.isBlank())) || (idMatch && authorMatch)
@@ -217,7 +243,13 @@ fun selectBestZip(urls: List<String>): String? {
     // 1. Prefer filename containing 'release'
     val release = nonArchive.firstOrNull { it.substringAfterLast("/").contains("release", ignoreCase = true) }
     if (release != null) return release
-    // 2. Prefer filename not containing 'debug'
+    // 2. Prefer standard/clean filename (not containing debug, nopif, inject, test)
+    val standard = nonArchive.firstOrNull {
+        val name = it.substringAfterLast("/").lowercase()
+        !name.contains("debug") && !name.contains("nopif") && !name.contains("inject") && !name.contains("test")
+    }
+    if (standard != null) return standard
+    // 3. Prefer filename not containing 'debug'
     val nonDebug = nonArchive.firstOrNull { !it.substringAfterLast("/").contains("debug", ignoreCase = true) }
     if (nonDebug != null) return nonDebug
     return nonArchive.first()
@@ -227,13 +259,27 @@ fun fetchLatestRelease(
     repo: String,
     installedUpdateJson: String? = null
 ): Pair<String, String> {
+    val isGitLab = repo.startsWith("gitlab:", ignoreCase = true) ||
+            repo.contains("gitlab.com", ignoreCase = true)
+    val cleanRepo = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+        .removePrefix("https://gitlab.com/").removePrefix("https://github.com/").trimEnd('/')
+
+    if (isGitLab) {
+        val gitlabResult = fetchGitLabReleaseViaApi(cleanRepo)
+        if (gitlabResult != null && gitlabResult.second.isNotBlank()) {
+            return gitlabResult
+        }
+    }
+
     // 1. Try update.json first (installed updateJson -> main/update.json -> master/update.json)
     val candidateUpdateUrls = mutableListOf<String>()
     if (!installedUpdateJson.isNullOrBlank()) {
         candidateUpdateUrls.add(installedUpdateJson)
     }
-    candidateUpdateUrls.add("https://raw.githubusercontent.com/$repo/main/update.json")
-    candidateUpdateUrls.add("https://raw.githubusercontent.com/$repo/master/update.json")
+    candidateUpdateUrls.add("https://raw.githubusercontent.com/$cleanRepo/main/update.json")
+    candidateUpdateUrls.add("https://raw.githubusercontent.com/$cleanRepo/master/update.json")
+    candidateUpdateUrls.add("https://gitlab.com/$cleanRepo/-/raw/main/update.json")
+    candidateUpdateUrls.add("https://gitlab.com/$cleanRepo/-/raw/master/update.json")
 
     for (uUrl in candidateUpdateUrls) {
         val updateInfo = fetchUpdateJson(uUrl)
@@ -243,15 +289,23 @@ fun fetchLatestRelease(
     }
 
     // 2. Try GitHub Releases web scraping (redirect/expanded_assets like KernelSU-Next, immune to API rate limits)
-    val webResult = fetchGitHubReleaseViaWeb(repo)
+    val webResult = fetchGitHubReleaseViaWeb(cleanRepo)
     if (webResult != null && webResult.second.isNotBlank()) {
         return webResult
     }
 
     // 3. Fall back to GitHub Releases API
-    val apiResult = fetchGitHubReleaseViaApi(repo)
+    val apiResult = fetchGitHubReleaseViaApi(cleanRepo)
     if (apiResult != null && apiResult.second.isNotBlank()) {
         return apiResult
+    }
+
+    // 4. Fall back to GitLab Releases API if not checked yet
+    if (!isGitLab) {
+        val gitlabResult = fetchGitLabReleaseViaApi(cleanRepo)
+        if (gitlabResult != null && gitlabResult.second.isNotBlank()) {
+            return gitlabResult
+        }
     }
 
     return Pair("", "")
@@ -439,6 +493,77 @@ private fun fetchGitHubReleaseViaApi(repo: String): Pair<String, String>? {
             val cleanVersion = resolveCleanVersion(tag, releaseName, bestZip)
             Pair(cleanVersion, bestZip)
         } else null
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun fetchGitLabReleaseViaApi(repo: String): Pair<String, String>? {
+    val cleanRepo = repo.removePrefix("gitlab:").removePrefix("github:").trim()
+        .removePrefix("https://gitlab.com/").removePrefix("http://gitlab.com/").trimEnd('/')
+    val encodedPath = URLEncoder.encode(cleanRepo, "UTF-8")
+
+    var jsonStr = ""
+    try {
+        val url = URL("https://gitlab.com/api/v4/projects/$encodedPath/releases")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.setRequestProperty("User-Agent", "SuiKernelManager")
+        conn.connectTimeout = 5000
+        conn.readTimeout = 5000
+
+        if (conn.responseCode == 200) {
+            jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+        }
+    } catch (e: Exception) {
+        // Fall back to root curl
+    }
+
+    if (jsonStr.isBlank()) {
+        try {
+            val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 8 'https://gitlab.com/api/v4/projects/$encodedPath/releases'"
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
+            process.waitFor()
+            if (text.startsWith("[") && text.endsWith("]")) {
+                jsonStr = text
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    if (jsonStr.isBlank()) return null
+
+    return try {
+        val array = JSONArray(jsonStr)
+        if (array.length() == 0) return null
+        val release = array.getJSONObject(0)
+        val tag = release.optString("tag_name", "")
+        val releaseName = release.optString("name", "")
+        val assets = release.optJSONObject("assets")
+        val links = assets?.optJSONArray("links")
+        val urls = mutableListOf<String>()
+
+        if (links != null) {
+            for (i in 0 until links.length()) {
+                val linkObj = links.getJSONObject(i)
+                val directUrl = linkObj.optString("direct_asset_url", "").ifBlank {
+                    linkObj.optString("url", "")
+                }
+                if (directUrl.contains(".zip", ignoreCase = true)) {
+                    urls.add(directUrl)
+                }
+            }
+        }
+
+        val bestZip = selectBestZip(urls)
+        if (bestZip != null) {
+            val cleanVersion = resolveCleanVersion(tag, releaseName, bestZip)
+            Pair(cleanVersion, bestZip)
+        } else {
+            null
+        }
     } catch (e: Exception) {
         null
     }
