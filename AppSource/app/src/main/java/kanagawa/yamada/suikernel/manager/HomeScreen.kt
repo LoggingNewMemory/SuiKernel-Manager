@@ -3,6 +3,8 @@ package kanagawa.yamada.suikernel.manager
 import android.app.WallpaperManager
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -19,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -34,9 +37,34 @@ import android.content.IntentFilter
 import android.widget.Toast
 import androidx.compose.ui.draw.alpha
 
+enum class WallpaperMode {
+    SUISEI_1,
+    SUISEI_2,
+    DEVICE
+}
+
+private const val PREFS_UI = "ui_preferences"
+private const val KEY_WALLPAPER_MODE = "wallpaper_mode"
+
+private fun getSavedWallpaperMode(context: Context): WallpaperMode {
+    val prefs = context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+    val saved = prefs.getString(KEY_WALLPAPER_MODE, WallpaperMode.DEVICE.name)
+    return try {
+        WallpaperMode.valueOf(saved ?: WallpaperMode.DEVICE.name)
+    } catch (e: Exception) {
+        WallpaperMode.DEVICE
+    }
+}
+
+private fun saveWallpaperMode(context: Context, mode: WallpaperMode) {
+    val prefs = context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+    prefs.edit().putString(KEY_WALLPAPER_MODE, mode.name).apply()
+}
+
 object WallpaperCache {
     val bitmap = mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
     var isLoaded = false
+    val loadAttempted = mutableStateOf(false)
 }
 
 @Composable
@@ -46,6 +74,14 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     val wallpaperBitmap by WallpaperCache.bitmap
+    val loadAttempted by WallpaperCache.loadAttempted
+    var wallpaperMode by remember { mutableStateOf(getSavedWallpaperMode(context)) }
+    val effectiveMode = when {
+        wallpaperMode == WallpaperMode.DEVICE && wallpaperBitmap != null -> WallpaperMode.DEVICE
+        wallpaperMode == WallpaperMode.DEVICE && loadAttempted && wallpaperBitmap == null -> WallpaperMode.SUISEI_1
+        wallpaperMode == WallpaperMode.DEVICE -> WallpaperMode.DEVICE
+        else -> wallpaperMode
+    }
     var fetchTrigger by remember { mutableStateOf(0) }
     val scrollState = rememberScrollState()
 
@@ -54,6 +90,7 @@ fun DashboardScreen(
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 if (intent?.action == Intent.ACTION_WALLPAPER_CHANGED) {
                     WallpaperCache.isLoaded = false
+                    WallpaperCache.loadAttempted.value = false
                     fetchTrigger++
                 }
             }
@@ -131,7 +168,10 @@ fun DashboardScreen(
     }
 
     LaunchedEffect(fetchTrigger) {
-        if (WallpaperCache.isLoaded) return@LaunchedEffect
+        if (WallpaperCache.isLoaded) {
+            WallpaperCache.loadAttempted.value = true
+            return@LaunchedEffect
+        }
 
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var localIsLoaded = false
@@ -195,6 +235,7 @@ fun DashboardScreen(
             if (localIsLoaded) {
                 WallpaperCache.isLoaded = true
             }
+            WallpaperCache.loadAttempted.value = true
         }
     }
 
@@ -342,6 +383,15 @@ fun DashboardScreen(
 
             // Right Column (Image)
             Card(
+                onClick = {
+                    val nextMode = when (effectiveMode) {
+                        WallpaperMode.SUISEI_1 -> WallpaperMode.SUISEI_2
+                        WallpaperMode.SUISEI_2 -> if (wallpaperBitmap != null) WallpaperMode.DEVICE else WallpaperMode.SUISEI_1
+                        WallpaperMode.DEVICE -> WallpaperMode.SUISEI_1
+                    }
+                    wallpaperMode = nextMode
+                    saveWallpaperMode(context, nextMode)
+                },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
@@ -353,22 +403,52 @@ fun DashboardScreen(
                         .fillMaxSize()
                         .padding(6.dp)
                 ) {
-                    if (wallpaperBitmap != null) {
-                        Image(
-                            bitmap = wallpaperBitmap!!,
-                            contentDescription = "User Wallpaper",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF3B4045))
-                        )
+                    Crossfade(
+                        targetState = effectiveMode,
+                        animationSpec = tween(durationMillis = 350),
+                        label = "WallpaperCrossfade"
+                    ) { mode ->
+                        when (mode) {
+                            WallpaperMode.SUISEI_1 -> {
+                                Image(
+                                    painter = painterResource(id = R.drawable.suisei_1),
+                                    contentDescription = "Suisei 1",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+                            }
+                            WallpaperMode.SUISEI_2 -> {
+                                Image(
+                                    painter = painterResource(id = R.drawable.suisei_2),
+                                    contentDescription = "Suisei 2",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+                            }
+                            WallpaperMode.DEVICE -> {
+                                if (wallpaperBitmap != null) {
+                                    Image(
+                                        bitmap = wallpaperBitmap!!,
+                                        contentDescription = "User Wallpaper",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(8.dp))
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFF3B4045))
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
