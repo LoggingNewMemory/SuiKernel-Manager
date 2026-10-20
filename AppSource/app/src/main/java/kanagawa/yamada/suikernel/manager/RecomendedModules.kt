@@ -25,8 +25,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -93,6 +91,7 @@ data class RecomendedModuleItem(
 fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
 
     var consoleOutput by remember { mutableStateOf<String?>(null) }
     var isInstalling by remember { mutableStateOf(false) }
@@ -121,6 +120,12 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 title = "Vector",
                 author = "JingMatrix",
                 repo = "JingMatrix/Vector",
+                platform = HostPlatform.GITHUB
+            ),
+            DefinitionItem(
+                title = "HMA OSS",
+                author = "frknkrc44",
+                repo = "frknkrc44/HMA-OSS",
                 platform = HostPlatform.GITHUB
             ),
             DefinitionItem(
@@ -295,6 +300,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 .background(MaterialTheme.colorScheme.background)
                 .statusBarsPadding()
                 .navigationBarsPadding()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp, vertical = 24.dp)
         ) {
         // Header
@@ -386,11 +392,11 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
         Spacer(modifier = Modifier.height(20.dp))
 
         // Module list
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+        Column(
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            items(modulesState, key = { it.repo }) { module ->
+            modulesState.forEach { module ->
                 ModuleRowItem(
                     module = module,
                     onActionClick = {
@@ -497,7 +503,9 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     }
                 )
             }
-        } // Close LazyColumn
+        } // Close modules Column
+
+        Spacer(modifier = Modifier.height(32.dp))
     } // Close main Column
 
     // Animated modal for Module Flasher

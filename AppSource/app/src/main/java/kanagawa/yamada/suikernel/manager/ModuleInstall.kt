@@ -167,36 +167,48 @@ fun findInstalledModule(
     author: String,
     repo: String
 ): InstalledModuleInfo? {
+    fun normKey(s: String): String = s.lowercase().replace("-", "").replace("_", "").replace(" ", "").trim()
+
     val cleanTitle = title.trim().lowercase()
     val cleanAuthor = author.trim().lowercase()
     val cleanRepo = repo.removePrefix("gitlab:").removePrefix("github:").trim()
     val repoProject = cleanRepo.substringAfterLast("/").trim().lowercase()
+
+    val normTitle = normKey(title)
+    val normRepoProject = normKey(repoProject)
 
     return installedList.firstOrNull { inst ->
         val instName = inst.name.trim().lowercase()
         val instId = inst.id.trim().lowercase()
         val instAuthor = inst.author.trim().lowercase()
 
+        val normInstName = normKey(inst.name)
+        val normInstId = normKey(inst.id)
+        val normUpdateJson = normKey(inst.updateJson)
+
         // 1. Direct updateJson check
         if (inst.updateJson.isNotBlank() && (
             inst.updateJson.contains(repo, ignoreCase = true) ||
             inst.updateJson.contains(cleanRepo, ignoreCase = true) ||
-            inst.updateJson.contains(repoProject, ignoreCase = true)
+            inst.updateJson.contains(repoProject, ignoreCase = true) ||
+            (normRepoProject.isNotBlank() && normUpdateJson.contains(normRepoProject))
         )) {
             return@firstOrNull true
         }
 
         // 2. Name / title match
         val nameMatch = instName == cleanTitle ||
-                instName == cleanTitle.replace(" ", "") ||
+                normInstName == normTitle ||
+                (normInstName.isNotBlank() && normTitle.isNotBlank() && (normInstName.contains(normTitle) || normTitle.contains(normInstName))) ||
                 (instName.isNotBlank() && cleanTitle.contains(instName)) ||
                 (cleanTitle.isNotBlank() && instName.contains(cleanTitle))
 
         // 3. ID match
         val idMatch = instId == repoProject ||
-                instId == cleanTitle.replace(" ", "") ||
-                instId.replace("_", "") == cleanTitle.replace(" ", "") ||
-                repoProject.contains(instId)
+                normInstId == normRepoProject ||
+                normInstId == normTitle ||
+                (normRepoProject.isNotBlank() && normInstId.contains(normRepoProject)) ||
+                (normInstId.isNotBlank() && normRepoProject.contains(normInstId))
 
         // 4. Author match
         val authorMatch = cleanAuthor.isNotBlank() && (
@@ -206,7 +218,7 @@ fun findInstalledModule(
                 (cleanAuthor.contains("evoker") && instAuthor.contains("evoker"))
         )
 
-        (nameMatch && (authorMatch || instAuthor.isBlank())) || (idMatch && authorMatch)
+        (nameMatch && (authorMatch || instAuthor.isBlank())) || (idMatch && (authorMatch || instAuthor.isBlank()))
     }
 }
 
@@ -814,12 +826,17 @@ fun isNewerVersion(latestTag: String, installedVersion: String, installedVersion
     if (installedVersion.equals(latestTag, ignoreCase = true)) return false
 
     fun normalize(v: String): String {
-        return v.trim()
+        var s = v.trim()
             .trimStart('v', 'V')
             .trimEnd('+')
-            .split("-")[0]
             .split(" ")[0]
             .trim()
+        if (s.contains("-") && !s.substringBefore("-").any { it.isDigit() }) {
+            s = s.substringAfter("-")
+        } else if (s.contains("-")) {
+            s = s.substringBefore("-")
+        }
+        return s.trim()
     }
 
     val normLatest = normalize(latestTag)
