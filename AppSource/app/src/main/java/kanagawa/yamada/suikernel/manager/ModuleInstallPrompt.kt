@@ -18,14 +18,8 @@
 
 package kanagawa.yamada.suikernel.manager
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -56,9 +50,11 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ModuleInstallPrompt(
-    title: String = "Module Flasher",
+    title: String = "Module Install",
     output: String,
     isInstalling: Boolean,
+    downloadProgress: Float? = null,
+    downloadProgressText: String? = null,
     onClose: () -> Unit
 ) {
     val scrollState = rememberScrollState()
@@ -142,6 +138,60 @@ fun ModuleInstallPrompt(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Download Progress Indicator
+            AnimatedVisibility(
+                visible = downloadProgress != null,
+                enter = expandVertically(tween(250)) + fadeIn(tween(250)),
+                exit = shrinkVertically(tween(200)) + fadeOut(tween(200))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Downloading...",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
+                        if (!downloadProgressText.isNullOrBlank()) {
+                            Text(
+                                text = downloadProgressText,
+                                fontFamily = GoogleSansFlex,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 12.sp,
+                                color = Color(0xFF26C6DA)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val animatedProgress by animateFloatAsState(
+                        targetValue = (downloadProgress ?: 0f).coerceIn(0f, 1f),
+                        animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+                        label = "DownloadProgressPrompt"
+                    )
+
+                    LinearProgressIndicator(
+                        progress = { animatedProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = PrimaryCyan,
+                        trackColor = Color(0xFF282B30)
+                    )
+                }
+            }
+
             // Console output box
             Box(
                 modifier = Modifier
@@ -207,13 +257,17 @@ fun ModuleInstallPrompt(
 
 @Composable
 fun InstallConsoleScreen(
-    title: String,
+    title: String = "Module Install",
     output: String,
     isInstalling: Boolean,
+    downloadProgress: Float? = null,
+    downloadProgressText: String? = null,
     onClose: () -> Unit
 ) = ModuleInstallPrompt(
     title = title,
     output = output,
     isInstalling = isInstalling,
+    downloadProgress = downloadProgress,
+    downloadProgressText = downloadProgressText,
     onClose = onClose
 )

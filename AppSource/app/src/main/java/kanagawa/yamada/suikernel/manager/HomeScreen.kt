@@ -28,6 +28,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -267,41 +268,82 @@ fun DashboardScreen(
             .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp)
     ) {
         // Header
-        Text(
-            text = "SuiKernel Manager",
-            fontFamily = GoogleSansFlex,
-            fontWeight = FontWeight.Medium,
-            fontSize = 24.sp,
-            color = TextPrimary
-        )
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "By: Kanagawa Yamada",
-                fontFamily = GoogleSansFlex,
-                fontWeight = FontWeight.Light,
-                fontSize = 14.sp,
-                color = TextPrimary
-            )
-            
-            Spacer(modifier = Modifier.width(8.dp))
-            
-            Box(
-                modifier = Modifier
-                    .background(
-                        color = if (isOfficial) Color(0xFF4CAF50) else Color(0xFFE05A67),
-                        shape = RoundedCornerShape(50)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            Column(
+                modifier = Modifier.weight(1f, fill = false)
             ) {
                 Text(
-                    text = if (isOfficial) "OFFICIAL" else "REJECTED",
+                    text = "SuiKernel Manager",
                     fontFamily = GoogleSansFlex,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 24.sp,
+                    color = TextPrimary
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Text(
+                        text = "By: Kanagawa Yamada",
+                        fontFamily = GoogleSansFlex,
+                        fontWeight = FontWeight.Light,
+                        fontSize = 14.sp,
+                        color = TextPrimary
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = if (isOfficial) Color(0xFF4CAF50) else Color(0xFFE05A67),
+                                shape = RoundedCornerShape(50)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (isOfficial) "OFFICIAL" else "REJECTED",
+                            fontFamily = GoogleSansFlex,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .offset(y = 2.dp)
+                    .size(35.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        try {
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://github.com/LoggingNewMemory/SuiKernel-Manager")
+                            )
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_github),
+                    contentDescription = "GitHub Repository",
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(35.dp)
                 )
             }
         }

@@ -23,6 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
@@ -886,10 +887,94 @@ fun isNewerVersion(latestTag: String, installedVersion: String, installedVersion
     return false
 }
 
-fun downloadModuleZip(context: Context, downloadUrl: String, onProgress: (Int) -> Unit): File? {
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return ""
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(java.util.Locale.US, "%.1f GB", gb)
+        mb >= 1.0 -> String.format(java.util.Locale.US, "%.1f MB", mb)
+        else -> String.format(java.util.Locale.US, "%.0f KB", kb)
+    }
+}
+
+fun downloadModuleZip(
+    context: Context,
+    downloadUrl: String,
+    onProgress: (progress: Int, downloadedBytes: Long, totalBytes: Long) -> Unit
+): File? {
     val file = File(context.cacheDir, "module_install_${System.currentTimeMillis()}.zip")
     val destPath = file.absolutePath
 
+    // 1. Direct streaming download via HttpURLConnection
+    try {
+        var currentUrl = downloadUrl
+        var connection: HttpURLConnection? = null
+        var redirects = 0
+        while (redirects < 8) {
+            val url = URL(currentUrl)
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = true
+                connectTimeout = 15000
+                readTimeout = 30000
+                setRequestProperty("User-Agent", "SuiKernelManager")
+                setRequestProperty("Accept-Encoding", "identity")
+            }
+            conn.connect()
+            val code = conn.responseCode
+            if (code in 301..308) {
+                val loc = conn.getHeaderField("Location")
+                if (!loc.isNullOrBlank()) {
+                    currentUrl = if (loc.startsWith("http", ignoreCase = true)) loc else URL(url, loc).toString()
+                    conn.disconnect()
+                    redirects++
+                    continue
+                }
+            }
+            connection = conn
+            break
+        }
+
+        if (connection != null && connection.responseCode == 200) {
+            val totalBytes = connection.contentLengthLong
+            var downloadedBytes = 0L
+            val buffer = ByteArray(32 * 1024)
+
+            connection.inputStream.use { input ->
+                FileOutputStream(file).use { output ->
+                    var read: Int
+                    var lastUpdate = 0L
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                        downloadedBytes += read
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdate > 80 || (totalBytes > 0 && downloadedBytes == totalBytes)) {
+                            lastUpdate = now
+                            val p = if (totalBytes > 0) {
+                                ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                            } else {
+                                ((downloadedBytes / (1024 * 1024)).toInt() * 5).coerceIn(0, 95)
+                            }
+                            onProgress(p, downloadedBytes, totalBytes)
+                        }
+                    }
+                    output.flush()
+                }
+            }
+
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "chmod 644 '$destPath'")).waitFor()
+
+            if (file.exists() && file.length() > 512) {
+                onProgress(100, file.length(), file.length())
+                return file
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    // 2. Fallback: su curl download
     return try {
         val sizeCmd = "/system/bin/curl -sIL -k -A 'SuiKernelManager' '$downloadUrl' | grep -i 'content-length' | tail -n 1 | tr -d '\\r\\n' | awk '{print \$2}'"
         val sizeProc = Runtime.getRuntime().exec(arrayOf("su", "-c", sizeCmd))
@@ -901,24 +986,24 @@ fun downloadModuleZip(context: Context, downloadUrl: String, onProgress: (Int) -
         val downloadProc = Runtime.getRuntime().exec(arrayOf("su", "-c", downloadCmd))
 
         while (downloadProc.isAlive) {
-            Thread.sleep(250)
+            Thread.sleep(200)
             if (file.exists()) {
                 val currentSize = file.length()
                 if (totalBytes > 0) {
                     val p = ((currentSize * 100) / totalBytes).toInt().coerceIn(1, 99)
-                    onProgress(p)
+                    onProgress(p, currentSize, totalBytes)
                 } else {
                     val p = ((currentSize / 1024) / 30).toInt().coerceIn(5, 95)
-                    onProgress(p)
+                    onProgress(p, currentSize, totalBytes)
                 }
             }
         }
         downloadProc.waitFor()
 
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "chmod 666 '$destPath'")).waitFor()
+        Runtime.getRuntime().exec(arrayOf("su", "-c", "chmod 644 '$destPath'")).waitFor()
 
         if (file.exists() && file.length() > 512) {
-            onProgress(100)
+            onProgress(100, file.length(), file.length())
             file
         } else {
             null
@@ -928,6 +1013,9 @@ fun downloadModuleZip(context: Context, downloadUrl: String, onProgress: (Int) -
         null
     }
 }
+
+fun downloadModuleZip(context: Context, downloadUrl: String, onProgress: (Int) -> Unit): File? =
+    downloadModuleZip(context, downloadUrl) { progress, _, _ -> onProgress(progress) }
 
 fun flashModuleZip(zipFile: File, onLine: (String) -> Unit) {
     try {

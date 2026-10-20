@@ -95,6 +95,8 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     var consoleOutput by remember { mutableStateOf<String?>(null) }
     var isInstalling by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf<Float?>(null) }
+    var downloadProgressText by remember { mutableStateOf<String?>(null) }
 
     val moduleDefs = remember {
         listOf(
@@ -286,6 +288,8 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     BackHandler(onBack = {
         if (consoleOutput != null && !isInstalling) {
             consoleOutput = null
+            downloadProgress = null
+            downloadProgressText = null
             modulesState = modulesState.map { it.copy(isBusy = false, progressText = "", downloadProgress = 0f) }
             loadLocalModules()
         } else if (!isInstalling) {
@@ -442,16 +446,37 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
                             consoleOutput = "--- Preparing installation for ${module.title} ---\n"
                             isInstalling = true
+                            downloadProgress = 0f
+                            downloadProgressText = "Connecting..."
 
                             val zipFile = withContext(Dispatchers.IO) {
-                                downloadModuleZip(context, targetUrl) { progress ->
+                                downloadModuleZip(context, targetUrl) { progress, downloaded, total ->
+                                    val pFloat = (progress / 100f).coerceIn(0f, 1f)
+                                    val pText = if (total > 0) {
+                                        "${formatFileSize(downloaded)} / ${formatFileSize(total)} • $progress%"
+                                    } else if (downloaded > 0) {
+                                        "${formatFileSize(downloaded)} • $progress%"
+                                    } else {
+                                        "$progress%"
+                                    }
+
+                                    coroutineScope.launch(Dispatchers.Main) {
+                                        downloadProgress = pFloat
+                                        downloadProgressText = pText
+                                    }
+
                                     modulesState = modulesState.map {
                                         if (it.repo == module.repo) it.copy(
                                             progressText = "$progress%",
-                                            downloadProgress = (progress / 100f).coerceIn(0f, 1f)
+                                            downloadProgress = pFloat
                                         ) else it
                                     }
                                 }
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                downloadProgress = null
+                                downloadProgressText = null
                             }
 
                             if (zipFile == null || !zipFile.exists()) {
@@ -467,7 +492,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                                 if (it.repo == module.repo) it.copy(progressText = "Flashing...", downloadProgress = 1f) else it
                             }
 
-                            consoleOutput = consoleOutput + "\n--- Download Complete (${zipFile.length() / 1024} KB) ---\n"
+                            consoleOutput = consoleOutput + "\n--- Download Complete (${formatFileSize(zipFile.length())}) ---\n"
                             consoleOutput = consoleOutput + "- Running module installer via ksud...\n\n"
 
                             try {
@@ -521,11 +546,15 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
         )
     ) {
         ModuleInstallPrompt(
-            title = "Module Flasher",
+            title = "Module Install",
             output = consoleOutput ?: "",
             isInstalling = isInstalling,
+            downloadProgress = downloadProgress,
+            downloadProgressText = downloadProgressText,
             onClose = {
                 consoleOutput = null
+                downloadProgress = null
+                downloadProgressText = null
                 modulesState = modulesState.map { it.copy(isBusy = false, progressText = "", downloadProgress = 0f) }
                 loadLocalModules()
             }
