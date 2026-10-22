@@ -86,6 +86,13 @@ object WallpaperCache {
     val loadAttempted = mutableStateOf(false)
 }
 
+data class KernelDisplayInfo(
+    val version: String,
+    val isOfficial: Boolean,
+    val isUnofficial: Boolean,
+    val rejectReason: String
+)
+
 @Composable
 fun DashboardScreen(
     onNavigateToSettings: () -> Unit = {},
@@ -132,35 +139,64 @@ fun DashboardScreen(
         try {
             val hasRoot = checkRootAccess()
             var output: String? = null
+            var supportedManagerVersion = ""
+
             if (hasRoot) {
                 val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/version"))
                 val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
                 output = reader.readLine()
                 process.waitFor()
+
+                try {
+                    val vProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/suikernel_manager_version 2>/dev/null"))
+                    val vReader = java.io.BufferedReader(java.io.InputStreamReader(vProc.inputStream))
+                    supportedManagerVersion = vReader.readLine()?.trim() ?: ""
+                    vProc.waitFor()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            if (supportedManagerVersion.isEmpty()) {
+                try {
+                    val f = java.io.File("/proc/suikernel_manager_version")
+                    if (f.exists()) {
+                        supportedManagerVersion = f.readText().trim()
+                    }
+                } catch (e: Exception) {
+                    // Ignore
+                }
             }
 
             val realKernelString = output?.split(" ")?.getOrNull(2) ?: ""
             val isSuiKernel = output?.contains("SuiKernel", ignoreCase = true) == true
             val isKsuNext = output?.contains("KernelSU-Next", ignoreCase = true) == true
+            val isVanilla = output?.contains("Vanilla", ignoreCase = true) == true
             val versionPrefix = if (realKernelString.isNotEmpty()) realKernelString.split("-")[0] else "Unknown"
 
-            val isOfficial = hasRoot && isSuiKernel && isKsuNext
+            val isSupportedVersion = supportedManagerVersion == "2.0"
+
+            val isOfficial = hasRoot && isSuiKernel && isKsuNext && isSupportedVersion
+            val isUnofficial = hasRoot && isSuiKernel && isVanilla && isSupportedVersion
             val rejectReason = when {
                 !hasRoot -> "No Root"
                 !isSuiKernel -> "Not SuiKernel"
-                !isKsuNext -> "Not KernelSU-Next"
+                !isKsuNext && !isVanilla -> "Unknown Variant"
+                !isSupportedVersion -> "Unsupported Version"
                 else -> ""
             }
 
-            Triple(versionPrefix, isOfficial, rejectReason)
+            KernelDisplayInfo(versionPrefix, isOfficial, isUnofficial, rejectReason)
         } catch (e: Exception) {
-            Triple("Unknown", false, "Unknown Error")
+            KernelDisplayInfo("Unknown", false, false, "Unknown Error")
         }
     }
     
-    val kernelVersion = kernelInfo.first
-    val isOfficial = kernelInfo.second
-    val rejectReason = kernelInfo.third
+    val kernelVersion = kernelInfo.version
+    val isOfficial = kernelInfo.isOfficial
+    val isUnofficial = kernelInfo.isUnofficial
+    val isSupported = isOfficial || isUnofficial
+    val rejectReason = kernelInfo.rejectReason
 
     val deviceName = remember {
         var vendorModel = ""
@@ -303,13 +339,21 @@ fun DashboardScreen(
                     Box(
                         modifier = Modifier
                             .background(
-                                color = if (isOfficial) Color(0xFF4CAF50) else Color(0xFFE05A67),
+                                color = when {
+                                    isOfficial -> Color(0xFF4CAF50)
+                                    isUnofficial -> Color(0xFFFF9800)
+                                    else -> Color(0xFFE05A67)
+                                },
                                 shape = RoundedCornerShape(50)
                             )
                             .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = if (isOfficial) "OFFICIAL" else "REJECTED",
+                            text = when {
+                                isOfficial -> "OFFICIAL"
+                                isUnofficial -> "UNOFFICIAL"
+                                else -> "REJECTED"
+                            },
                             fontFamily = GoogleSansFlex,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -538,7 +582,7 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (isOfficial) {
+        if (isSupported) {
             // Recommended Modules
             Card(
                 modifier = Modifier
@@ -676,8 +720,8 @@ fun DashboardScreen(
                     Text(
                         text = when (rejectReason) {
                             "Not SuiKernel" -> "SuiKernel manager only works with SuiKernel! Why you think SuiKernel Manager can work with other kernels?!"
-                            "Not KernelSU-Next" -> "SuiKernel manager only works with KernelSU Next variant, if you use Vanilla. It just doesn't works, thanks."
                             "No Root" -> "You think you use the SuiKernel that already supports SuiKernel Manager huh? Nah it's not. Get out"
+                            "Unsupported Version" -> "This SuiKernel Manager can't work with this SuiKernel version! Please downgrade / upgrade to the supported SuiKernel Manager"
                             else -> "This device does not meet the requirements to access SuiKernel modules and settings."
                         },
                         fontFamily = GoogleSansFlex,

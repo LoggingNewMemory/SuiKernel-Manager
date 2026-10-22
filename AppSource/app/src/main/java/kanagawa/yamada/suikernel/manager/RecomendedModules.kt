@@ -97,6 +97,9 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     var isInstalling by remember { mutableStateOf(false) }
     var downloadProgress by remember { mutableStateOf<Float?>(null) }
     var downloadProgressText by remember { mutableStateOf<String?>(null) }
+    var isKsudAvailable by remember { mutableStateOf(true) }
+    var isKsudChecked by remember { mutableStateOf(false) }
+    var isVanillaKernel by remember { mutableStateOf(false) }
 
     val moduleDefs = remember {
         listOf(
@@ -168,11 +171,47 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     fun loadLocalModules() {
         coroutineScope.launch(Dispatchers.IO) {
+            val ksudOk = try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "which ksud >/dev/null 2>&1 || [ -x /data/adb/ksud ] || [ -f /data/adb/ksud ]"))
+                p.waitFor() == 0
+            } catch (e: Exception) {
+                false
+            }
+            val vanilla = try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/version"))
+                val r = BufferedReader(InputStreamReader(p.inputStream))
+                val line = r.readLine()
+                p.waitFor()
+                line?.contains("Vanilla", ignoreCase = true) == true
+            } catch (e: Exception) {
+                false
+            }
+
+            withContext(Dispatchers.Main) {
+                isKsudAvailable = ksudOk
+                isVanillaKernel = vanilla
+                isKsudChecked = true
+                if (vanilla) {
+                    modulesState = modulesState.filterNot {
+                        it.title.equals("Brene SUSFS", ignoreCase = true) || it.repo.contains("BRENE", ignoreCase = true)
+                    }
+                }
+            }
+
+            if (!ksudOk) {
+                return@launch
+            }
+
             val pendingReboot = getPendingRebootRepos(context)
 
             // Fast local check: query installed modules via root & match with cached metadata
             val installedList = fetchInstalledModules()
-            val localChecked = modulesState.map { item ->
+            val baseList = if (vanilla) {
+                modulesState.filterNot { it.title.equals("Brene SUSFS", ignoreCase = true) || it.repo.contains("BRENE", ignoreCase = true) }
+            } else {
+                modulesState
+            }
+            val localChecked = baseList.map { item ->
                 val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
                 if (installed != null) {
                     val cachedLatestVer = getCachedModuleVersion(context, item.repo)
@@ -214,15 +253,21 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     }
 
     fun checkForRemoteUpdates(isManual: Boolean = true) {
-        if (isCheckingUpdates) return
+        if (isCheckingUpdates || !isKsudAvailable) return
         isCheckingUpdates = true
 
         coroutineScope.launch(Dispatchers.IO) {
             val pendingReboot = getPendingRebootRepos(context)
             val installedList = fetchInstalledModules()
 
+            val targetModules = if (isVanillaKernel) {
+                modulesState.filterNot { it.title.equals("Brene SUSFS", ignoreCase = true) || it.repo.contains("BRENE", ignoreCase = true) }
+            } else {
+                modulesState
+            }
+
             // Run remote checks in PARALLEL using async/awaitAll for blazing fast updates
-            val updateDeferreds = modulesState.map { item ->
+            val updateDeferreds = targetModules.map { item ->
                 async {
                     val installed = findInstalledModule(installedList, item.title, item.author, item.repo)
                     val effectiveUpdateJson = installed?.updateJson?.ifBlank { null }
@@ -341,53 +386,55 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 fontSize = 14.sp
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            if (isKsudAvailable) {
+                Spacer(modifier = Modifier.height(14.dp))
 
-            // Check for Updates Button
-            Surface(
-                onClick = { checkForRemoteUpdates() },
-                enabled = !isCheckingUpdates && !isInstalling,
-                shape = RoundedCornerShape(50),
-                color = PillBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF33383F)),
-                modifier = Modifier
-                    .width(headerWidthDp ?: 275.dp)
-                    .height(36.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                // Check for Updates Button
+                Surface(
+                    onClick = { checkForRemoteUpdates() },
+                    enabled = !isCheckingUpdates && !isInstalling,
+                    shape = RoundedCornerShape(50),
+                    color = PillBackground,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF33383F)),
+                    modifier = Modifier
+                        .width(headerWidthDp ?: 275.dp)
+                        .height(36.dp)
                 ) {
-                    if (isCheckingUpdates) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = PrimaryCyan
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Checking updates...",
-                            fontFamily = GoogleSansFlex,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = TextSecondary
-                        )
-                    } else {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_restart),
-                            contentDescription = "Check for Updates",
-                            tint = PrimaryCyan,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Check for Updates",
-                            fontFamily = GoogleSansFlex,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = TextPrimary
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (isCheckingUpdates) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = PrimaryCyan
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Checking updates...",
+                                fontFamily = GoogleSansFlex,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_restart),
+                                contentDescription = "Check for Updates",
+                                tint = PrimaryCyan,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Check for Updates",
+                                fontFamily = GoogleSansFlex,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp,
+                                color = TextPrimary
+                            )
+                        }
                     }
                 }
             }
@@ -395,11 +442,57 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Module list
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
+        if (isKsudChecked && !isKsudAvailable) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = Color(0xFFE05A67),
+                                shape = RoundedCornerShape(50)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "UNSUPPORTED",
+                            fontFamily = GoogleSansFlex,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    Text(
+                        text = "Environment Unsupported",
+                        fontFamily = GoogleSansFlex,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp,
+                        color = TextPrimary
+                    )
+
+                    Text(
+                        text = "Recomended Modules is not supported in this environtment. Please use KernelSU forks (Ex: SukiSU, ReSukiSU, KowSU, etc)",
+                        fontFamily = GoogleSansFlex,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+        } else {
+            // Module list
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
             modulesState.forEach { module ->
                 ModuleRowItem(
                     module = module,
@@ -529,6 +622,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 )
             }
         } // Close modules Column
+    } // Close else branch
 
         Spacer(modifier = Modifier.height(32.dp))
     } // Close main Column
