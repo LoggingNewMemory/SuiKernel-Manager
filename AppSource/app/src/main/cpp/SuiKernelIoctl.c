@@ -190,6 +190,62 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeRunCommandWithOutput
     return result;
 }
 
+// Writes a single configuration file directly to /data/SuiKernel/<feature>
+JNIEXPORT jboolean JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteFeature(
+    JNIEnv *env, jobject thiz, jstring name_jstr, jstring val_jstr) {
+    if (!name_jstr || !val_jstr) return JNI_FALSE;
+    const char *name = (*env)->GetStringUTFChars(env, name_jstr, NULL);
+    const char *val = (*env)->GetStringUTFChars(env, val_jstr, NULL);
+    if (!name || !val) return JNI_FALSE;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOGE("fork failed in nativeWriteFeature: %d", errno);
+        (*env)->ReleaseStringUTFChars(env, name_jstr, name);
+        (*env)->ReleaseStringUTFChars(env, val_jstr, val);
+        return JNI_FALSE;
+    }
+
+    if (pid == 0) {
+        // Child process: elevate to root
+        int fd = open("/dev/null", O_RDWR);
+        if (fd >= 0) {
+            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            close(fd);
+        }
+
+        mkdir("/data/SuiKernel", 0755);
+        chmod("/data/SuiKernel", 0755);
+
+        char path[128];
+        snprintf(path, sizeof(path), "/data/SuiKernel/%s", name);
+        int out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (out_fd >= 0) {
+            write(out_fd, val, strlen(val));
+            fdatasync(out_fd);
+            close(out_fd);
+            chmod(path, 0644);
+
+            int dir_fd = open("/data/SuiKernel", O_RDONLY | O_DIRECTORY);
+            if (dir_fd >= 0) {
+                fsync(dir_fd);
+                close(dir_fd);
+            }
+            _exit(0);
+        }
+        LOGE("Failed to open %s for write: %d", path, errno);
+        _exit(1);
+    }
+
+    (*env)->ReleaseStringUTFChars(env, name_jstr, name);
+    (*env)->ReleaseStringUTFChars(env, val_jstr, val);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? JNI_TRUE : JNI_FALSE;
+}
+
 // Directly writes configuration files to /data/SuiKernel/ without spawning /system/bin/sh or toybox
 JNIEXPORT jboolean JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
