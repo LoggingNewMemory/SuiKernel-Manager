@@ -211,7 +211,12 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteFeature(
         // Child process: elevate to root
         int fd = open("/dev/null", O_RDWR);
         if (fd >= 0) {
-            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            if (ret != 0) {
+                LOGE("CMD_SUI_ELEVATE_ROOT failed: ret=%d errno=%d uid=%d", ret, errno, getuid());
+            } else {
+                LOGI("Elevated to root successfully (uid=%d euid=%d)", getuid(), geteuid());
+            }
             close(fd);
         }
 
@@ -232,9 +237,10 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteFeature(
                 fsync(dir_fd);
                 close(dir_fd);
             }
+            LOGI("Successfully wrote /data/SuiKernel/%s = %s", name, val);
             _exit(0);
         }
-        LOGE("Failed to open %s for write: %d", path, errno);
+        LOGE("Failed to open %s for write: %d (uid=%d euid=%d)", path, errno, getuid(), geteuid());
         _exit(1);
     }
 
@@ -282,7 +288,10 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
         // Child process: elevate to root
         int fd = open("/dev/null", O_RDWR);
         if (fd >= 0) {
-            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            if (ret != 0) {
+                LOGE("nativeWriteStorage elevation failed: ret=%d errno=%d uid=%d", ret, errno, getuid());
+            }
             close(fd);
         }
 
@@ -360,7 +369,10 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadStorage(JNIEnv *
         close(pipefd[0]); // close read end
         int fd = open("/dev/null", O_RDWR);
         if (fd >= 0) {
-            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            if (ret != 0) {
+                LOGE("nativeReadStorage elevation failed: ret=%d errno=%d uid=%d", ret, errno, getuid());
+            }
             close(fd);
         }
 
