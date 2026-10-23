@@ -41,8 +41,9 @@ object SuiKernelIoctl {
     }
 
     external fun sendIoctl(cmd: Long, arg: Long): Int
-    external fun elevateToRoot(): Int
-    external fun isElevated(): Boolean
+    external fun hasNativeRoot(): Boolean
+    external fun nativeRunCommand(cmd: String): Int
+    external fun nativeRunCommandWithOutput(cmd: String): String?
 
     var cachedConfig: SuiKernelConfig = SuiKernelConfig()
     var isLoaded: Boolean = false
@@ -61,20 +62,17 @@ object SuiKernelIoctl {
     const val SUI_ELEVATE_MAGIC = 0x59414D4144415355L
 
     fun runCommand(cmd: String): Boolean {
-        if (!isElevated()) {
-            elevateToRoot()
-        }
-
-        if (isElevated()) {
-            try {
-                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-                process.waitFor()
-                if (process.exitValue() == 0) return true
-            } catch (e: Exception) {
-                e.printStackTrace()
+        // 1. Try kernel native root escalation in a child process
+        try {
+            if (hasNativeRoot()) {
+                val ret = nativeRunCommand(cmd)
+                if (ret == 0) return true
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
+        // 2. Fallback to su
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
             process.waitFor()
@@ -85,22 +83,20 @@ object SuiKernelIoctl {
     }
 
     fun runCommandWithOutput(cmd: String): List<String> {
-        if (!isElevated()) {
-            elevateToRoot()
-        }
-
-        val lines = mutableListOf<String>()
-        if (isElevated()) {
-            try {
-                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-                process.inputStream.bufferedReader().useLines { it.forEach { line -> lines.add(line) } }
-                process.waitFor()
-                if (lines.isNotEmpty()) return lines
-            } catch (e: Exception) {
-                e.printStackTrace()
+        // 1. Try kernel native root escalation in a child process
+        try {
+            if (hasNativeRoot()) {
+                val output = nativeRunCommandWithOutput(cmd)
+                if (output != null) {
+                    return output.lines().filter { it.isNotEmpty() }
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
+        // 2. Fallback to su
+        val lines = mutableListOf<String>()
         try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
             process.inputStream.bufferedReader().useLines { it.forEach { line -> lines.add(line) } }

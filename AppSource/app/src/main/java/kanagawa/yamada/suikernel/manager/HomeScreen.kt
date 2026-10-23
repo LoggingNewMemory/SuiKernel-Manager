@@ -201,9 +201,10 @@ fun DashboardScreen(
                 true
             }
 
-            val isOfficial = isSuiKernel && isKsuNext && isSupportedVersion
-            val isUnofficial = isSuiKernel && isVanilla && isSupportedVersion
+            val isOfficial = hasRoot && isSuiKernel && isKsuNext && isSupportedVersion
+            val isUnofficial = hasRoot && isSuiKernel && isVanilla && isSupportedVersion
             val rejectReason = when {
+                !hasRoot -> "No Root"
                 !isSuiKernel -> "Not SuiKernel"
                 !isKsuNext && !isVanilla -> "Unknown Variant"
                 !isSupportedVersion -> "Unsupported Version"
@@ -743,6 +744,7 @@ fun DashboardScreen(
                     Text(
                         text = when (rejectReason) {
                             "Not SuiKernel" -> "SuiKernel manager only works with SuiKernel! Why you think SuiKernel Manager can work with other kernels?!"
+                            "No Root" -> "You think you use the SuiKernel that already supports SuiKernel Manager huh? Nah it's not. Get out"
                             "Unsupported Version" -> "This SuiKernel Manager can't work with this SuiKernel version! Please downgrade / upgrade to the supported SuiKernel Manager"
                             else -> "This device does not meet the requirements to access SuiKernel modules and settings."
                         },
@@ -761,32 +763,16 @@ fun DashboardScreen(
 }
 
 fun checkRootAccess(): Boolean {
-    // 1. Try kernel native root escalation
+    // 1. Try kernel native root escalation in a child process
     try {
-        if (!SuiKernelIoctl.isElevated()) {
-            SuiKernelIoctl.elevateToRoot()
-        }
-        if (SuiKernelIoctl.isElevated()) {
+        if (SuiKernelIoctl.hasNativeRoot()) {
             return true
         }
     } catch (e: Exception) {
         // Ignore
     }
 
-    // 2. Check if shell is already running as root
-    try {
-        val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "id"))
-        val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-        val output = reader.readLine()
-        process.waitFor()
-        if (output?.contains("uid=0(root)") == true) {
-            return true
-        }
-    } catch (e: Exception) {
-        // Fallback
-    }
-
-    // 3. Fallback to traditional su
+    // 2. Fallback to traditional su
     return try {
         val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
         val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
