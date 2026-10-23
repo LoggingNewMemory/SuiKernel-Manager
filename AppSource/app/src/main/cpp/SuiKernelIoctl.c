@@ -226,6 +226,11 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteFeature(
         char path[128];
         snprintf(path, sizeof(path), "/data/SuiKernel/%s", name);
         int out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (out_fd < 0 && errno == EACCES) {
+            chmod(path, 0644);
+            unlink(path);
+            out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        }
         if (out_fd >= 0) {
             write(out_fd, val, strlen(val));
             fdatasync(out_fd);
@@ -311,6 +316,11 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
             char path[128];
             snprintf(path, sizeof(path), "/data/SuiKernel/%s", names[i]);
             int out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (out_fd < 0 && errno == EACCES) {
+                chmod(path, 0644);
+                unlink(path);
+                out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            }
             if (out_fd >= 0) {
                 if (values[i]) {
                     write(out_fd, values[i], strlen(values[i]));
