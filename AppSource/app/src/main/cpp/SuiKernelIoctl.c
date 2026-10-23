@@ -379,7 +379,9 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadStorage(JNIEnv *
                 close(in_fd);
                 if (n > 0) {
                     val[n] = '\0';
-                    if (val[n - 1] == '\n') val[n - 1] = '\0';
+                    while (n > 0 && (val[n - 1] == '\n' || val[n - 1] == '\r' || val[n - 1] == ' ' || val[n - 1] == '\t')) {
+                        val[--n] = '\0';
+                    }
                     char line[64];
                     int len = snprintf(line, sizeof(line), "%s=%s\n", names[i], val);
                     write(pipefd[1], line, len);

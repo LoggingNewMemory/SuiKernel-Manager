@@ -83,18 +83,6 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
         }
     }
 
-    fun currentConfig() = SuiKernelConfig(
-        anyaThermal = anyaThermal,
-        yamadaBoost = yamadaBoost,
-        performanceMode = performanceMode,
-        inahoAudio = inahoAudio,
-        tenebrion = tenebrion,
-        airaniCpuset = airaniCpuset,
-        sandevistan = sandevistan,
-        moonaZram = moonaZram,
-        sparxieEnabled = sparxieEnabled,
-        sparxieSwap = sparxieSwap
-    )
 
     val scrollState = rememberScrollState()
     Column(
@@ -169,7 +157,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 onCheckedChange = { 
                     anyaThermal = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_ANYA_THERMAL, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(currentConfig().copy(anyaThermal = it))
+                    SuiKernelIoctl.writeFeature("anya_thermal", if (it) "1" else "0")
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -193,13 +181,15 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                         if (it) {
                             if (performanceMode == "Gaming") {
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
+                                SuiKernelIoctl.writeFeature("touch_boost", "2")
                             } else {
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
+                                SuiKernelIoctl.writeFeature("touch_boost", "1")
                             }
                         } else {
                             SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_DISABLE, 1L)
+                            SuiKernelIoctl.writeFeature("touch_boost", "0")
                         }
-                        SuiKernelIoctl.syncStorage(currentConfig().copy(yamadaBoost = it))
                     }
                 )
                 
@@ -214,7 +204,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                             onClick = { 
                                 performanceMode = "Balanced" 
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
-                                SuiKernelIoctl.syncStorage(currentConfig().copy(performanceMode = "Balanced"))
+                                SuiKernelIoctl.writeFeature("touch_boost", "1")
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
                             shape = RoundedCornerShape(8.dp),
@@ -238,7 +228,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                             onClick = { 
                                 performanceMode = "Gaming" 
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
-                                SuiKernelIoctl.syncStorage(currentConfig().copy(performanceMode = "Gaming"))
+                                SuiKernelIoctl.writeFeature("touch_boost", "2")
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
                             shape = RoundedCornerShape(8.dp),
@@ -274,7 +264,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 onCheckedChange = { 
                     inahoAudio = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_INAHO_AUDIO, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(currentConfig().copy(inahoAudio = it))
+                    SuiKernelIoctl.writeFeature("inaho", if (it) "1" else "0")
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -295,7 +285,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 onCheckedChange = { 
                     tenebrion = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_TENEBRION, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(currentConfig().copy(tenebrion = it))
+                    SuiKernelIoctl.writeFeature("tenebrion", if (it) "1" else "0")
                 },
                 modifier = Modifier.padding(16.dp)
             )
@@ -316,7 +306,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 onCheckedChange = { 
                     airaniCpuset = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_AIRANI_CPUSET, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(currentConfig().copy(airaniCpuset = it))
+                    SuiKernelIoctl.writeFeature("airani", if (it) "1" else "0")
                     showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
@@ -338,7 +328,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 onCheckedChange = { 
                     sandevistan = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SANDEVISTAN, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(currentConfig().copy(sandevistan = it))
+                    SuiKernelIoctl.writeFeature("sandevistan", if (it) "1" else "0")
                     showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
@@ -360,7 +350,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 onCheckedChange = { 
                     moonaZram = it
                     SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_MOONA_ZRAM, if (it) 1L else 0L)
-                    SuiKernelIoctl.syncStorage(currentConfig().copy(moonaZram = it))
+                    SuiKernelIoctl.writeFeature("moona_zram", if (it) "1" else "0")
                     showRebootToast()
                 },
                 modifier = Modifier.padding(16.dp)
@@ -386,10 +376,12 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                         if (!it) {
                             sparxieSwap = 30f
                             SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, 30L)
+                            SuiKernelIoctl.writeFeature("sparxie", "0")
+                            SuiKernelIoctl.writeFeature("swappiness", "30")
                         } else {
                             SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, sparxieSwap.toLong())
+                            SuiKernelIoctl.writeFeature("sparxie", "1")
                         }
-                        SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieEnabled = it, sparxieSwap = if (!it) 30f else sparxieSwap))
                     }
                 )
                 
@@ -403,7 +395,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, it.toLong())
                             },
                             onValueChangeFinished = {
-                                SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieSwap = sparxieSwap))
+                                SuiKernelIoctl.writeFeature("swappiness", sparxieSwap.toInt().toString())
                             },
                             valueRange = 10f..100f,
                             colors = SliderDefaults.colors(

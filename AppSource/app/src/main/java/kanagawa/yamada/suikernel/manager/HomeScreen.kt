@@ -765,7 +765,7 @@ fun DashboardScreen(
 fun checkRootAccess(): Boolean {
     // 1. Try kernel native root escalation in a child process
     try {
-        if (SuiKernelIoctl.hasNativeRoot()) {
+        if (SuiKernelIoctl.isNativeRootSupported()) {
             return true
         }
     } catch (e: Exception) {

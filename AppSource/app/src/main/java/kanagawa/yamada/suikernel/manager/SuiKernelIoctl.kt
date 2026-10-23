@@ -61,6 +61,24 @@ object SuiKernelIoctl {
     var cachedConfig: SuiKernelConfig = SuiKernelConfig()
     var isLoaded: Boolean = false
 
+    @Volatile
+    private var nativeRootAvailable: Boolean? = null
+
+    fun isNativeRootSupported(): Boolean {
+        nativeRootAvailable?.let { return it }
+        return synchronized(this) {
+            nativeRootAvailable ?: run {
+                val supported = try {
+                    hasNativeRoot()
+                } catch (e: Exception) {
+                    false
+                }
+                nativeRootAvailable = supported
+                supported
+            }
+        }
+    }
+
     private val ioExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     const val CMD_ANYA_THERMAL = 0x392C8989L
@@ -79,7 +97,7 @@ object SuiKernelIoctl {
     fun runCommand(cmd: String): Boolean {
         // 1. Try kernel native root escalation in a child process
         try {
-            if (hasNativeRoot()) {
+            if (isNativeRootSupported()) {
                 val ret = nativeRunCommand(cmd)
                 if (ret == 0) return true
             }
@@ -100,7 +118,7 @@ object SuiKernelIoctl {
     fun runCommandWithOutput(cmd: String): List<String> {
         // 1. Try kernel native root escalation in a child process
         try {
-            if (hasNativeRoot()) {
+            if (isNativeRootSupported()) {
                 val output = nativeRunCommandWithOutput(cmd)
                 if (output != null) {
                     return output.lines().filter { it.isNotEmpty() }
@@ -149,7 +167,7 @@ object SuiKernelIoctl {
         updateCache(name, value)
         ioExecutor.execute {
             var written = false
-            if (hasNativeRoot()) {
+            if (isNativeRootSupported()) {
                 written = nativeWriteFeature(name, value)
             }
             if (!written) {
@@ -170,7 +188,7 @@ object SuiKernelIoctl {
         val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt().toString() else "30"
 
         var written = false
-        if (hasNativeRoot()) {
+        if (isNativeRootSupported()) {
             written = nativeWriteStorage(
                 anya = anyaVal,
                 touchBoost = touchBoostVal,
@@ -202,19 +220,12 @@ object SuiKernelIoctl {
         }
     }
 
-    fun readStorage(): SuiKernelConfig {
-        // Ensure any queued writes on ioExecutor are completed before reading
-        try {
-            ioExecutor.submit {}.get(2, java.util.concurrent.TimeUnit.SECONDS)
-        } catch (e: Exception) {
-            // Proceed
-        }
-
+    private fun doReadStorage(): SuiKernelConfig {
         val map = mutableMapOf<String, String>()
 
         // 1. First priority: direct C filesystem read from /data/SuiKernel/ (no sh / toybox)
         try {
-            if (hasNativeRoot()) {
+            if (isNativeRootSupported()) {
                 val output = nativeReadStorage()
                 if (!output.isNullOrEmpty()) {
                     output.lines().forEach { line ->
@@ -276,7 +287,18 @@ object SuiKernelIoctl {
         val config = SuiKernelConfig()
         cachedConfig = config
         isLoaded = true
+        doWriteStorage(config)
         return config
+    }
+
+    fun readStorage(): SuiKernelConfig {
+        return try {
+            ioExecutor.submit(java.util.concurrent.Callable {
+                doReadStorage()
+            }).get(3, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: Exception) {
+            cachedConfig
+        }
     }
 
     fun syncStorage(config: SuiKernelConfig) {
