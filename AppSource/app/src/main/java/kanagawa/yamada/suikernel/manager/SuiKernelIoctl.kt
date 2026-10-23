@@ -44,9 +44,26 @@ object SuiKernelIoctl {
     external fun hasNativeRoot(): Boolean
     external fun nativeRunCommand(cmd: String): Int
     external fun nativeRunCommandWithOutput(cmd: String): String?
+    external fun nativeWriteStorage(
+        anya: String,
+        touchBoost: String,
+        inaho: String,
+        tenebrion: String,
+        airani: String,
+        sandevistan: String,
+        moona: String,
+        sparxie: String,
+        swappiness: String
+    ): Boolean
+    external fun nativeReadStorage(): String?
 
     var cachedConfig: SuiKernelConfig = SuiKernelConfig()
     var isLoaded: Boolean = false
+
+    private val storageLock = Any()
+    private val syncExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    private var pendingSyncTask: java.util.concurrent.ScheduledFuture<*>? = null
+    @Volatile private var latestConfigToSync: SuiKernelConfig? = null
 
     const val CMD_ANYA_THERMAL = 0x392C8989L
     const val CMD_YAMADA_TOUCH_BOOST_DISABLE = 0x7A1F2C3BL
@@ -107,73 +124,141 @@ object SuiKernelIoctl {
         return lines
     }
 
-    fun readStorage(): SuiKernelConfig {
-        val map = mutableMapOf<String, String>()
-        try {
-            val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan moona_zram sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
-            val lines = runCommandWithOutput(cmd)
-            lines.forEach { line ->
-                val parts = line.split("=", limit = 2)
-                if (parts.size == 2) {
-                    map[parts[0].trim()] = parts[1].trim()
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
+    private fun doWriteStorage(config: SuiKernelConfig) {
+        val anyaVal = if (config.anyaThermal) "1" else "0"
+        val touchBoostVal = if (!config.yamadaBoost) "0" else if (config.performanceMode == "Gaming") "2" else "1"
+        val inahoVal = if (config.inahoAudio) "1" else "0"
+        val tenebrionVal = if (config.tenebrion) "1" else "0"
+        val airaniVal = if (config.airaniCpuset) "1" else "0"
+        val sandevistanVal = if (config.sandevistan) "1" else "0"
+        val moonaVal = if (config.moonaZram) "1" else "0"
+        val sparxieVal = if (config.sparxieEnabled) "1" else "0"
+        val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt().toString() else "30"
+
+        var written = false
+        if (hasNativeRoot()) {
+            written = nativeWriteStorage(
+                anya = anyaVal,
+                touchBoost = touchBoostVal,
+                inaho = inahoVal,
+                tenebrion = tenebrionVal,
+                airani = airaniVal,
+                sandevistan = sandevistanVal,
+                moona = moonaVal,
+                sparxie = sparxieVal,
+                swappiness = swappinessVal
+            )
         }
 
-        val touchBoost = map["touch_boost"]
-        val yamadaBoost = touchBoost != "0"
-        val performanceMode = if (touchBoost == "2") "Gaming" else "Balanced"
+        // Fallback to shell command if direct C write was not used or failed
+        if (!written) {
+            val cmd = "mkdir -p /data/SuiKernel && " +
+                    "echo -n $airaniVal > /data/SuiKernel/airani && " +
+                    "echo -n $sandevistanVal > /data/SuiKernel/sandevistan && " +
+                    "echo -n $moonaVal > /data/SuiKernel/moona_zram && " +
+                    "echo -n $sparxieVal > /data/SuiKernel/sparxie && " +
+                    "echo -n $swappinessVal > /data/SuiKernel/swappiness && " +
+                    "echo -n $inahoVal > /data/SuiKernel/inaho && " +
+                    "echo -n $touchBoostVal > /data/SuiKernel/touch_boost && " +
+                    "echo -n $tenebrionVal > /data/SuiKernel/tenebrion && " +
+                    "echo -n $anyaVal > /data/SuiKernel/anya_thermal && " +
+                    "chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/*"
 
-        val config = SuiKernelConfig(
-            anyaThermal = map["anya_thermal"] != "0",
-            yamadaBoost = yamadaBoost,
-            performanceMode = performanceMode,
-            inahoAudio = map["inaho"] != "0",
-            tenebrion = map["tenebrion"] != "0",
-            airaniCpuset = map["airani"] != "0",
-            sandevistan = map["sandevistan"] == "1",
-            moonaZram = map["moona_zram"] != "0",
-            sparxieEnabled = map["sparxie"] != "0",
-            sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: 30f
-        )
-        cachedConfig = config
-        isLoaded = true
-        return config
+            runCommand(cmd)
+        }
     }
 
-    fun syncStorage(config: SuiKernelConfig) {
-        cachedConfig = config
-        Thread {
+    fun readStorage(): SuiKernelConfig {
+        synchronized(storageLock) {
+            // If there's an unwritten pending sync, flush it immediately before reading
+            pendingSyncTask?.let {
+                if (!it.isDone) {
+                    it.cancel(false)
+                    latestConfigToSync?.let { cfg ->
+                        try {
+                            doWriteStorage(cfg)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+            }
+
+            val map = mutableMapOf<String, String>()
+
+            // 1. First priority: direct C filesystem read from /data/SuiKernel/ (no sh / toybox)
             try {
-                val anyaVal = if (config.anyaThermal) "1" else "0"
-                val touchBoostVal = if (!config.yamadaBoost) "0" else if (config.performanceMode == "Gaming") "2" else "1"
-                val inahoVal = if (config.inahoAudio) "1" else "0"
-                val tenebrionVal = if (config.tenebrion) "1" else "0"
-                val airaniVal = if (config.airaniCpuset) "1" else "0"
-                val sandevistanVal = if (config.sandevistan) "1" else "0"
-                val moonaVal = if (config.moonaZram) "1" else "0"
-                val sparxieVal = if (config.sparxieEnabled) "1" else "0"
-                val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt() else 30
-
-                val cmd = "mkdir -p /data/SuiKernel && " +
-                        "echo -n $airaniVal > /data/SuiKernel/airani && " +
-                        "echo -n $sandevistanVal > /data/SuiKernel/sandevistan && " +
-                        "echo -n $moonaVal > /data/SuiKernel/moona_zram && " +
-                        "echo -n $sparxieVal > /data/SuiKernel/sparxie && " +
-                        "echo -n $swappinessVal > /data/SuiKernel/swappiness && " +
-                        "echo -n $inahoVal > /data/SuiKernel/inaho && " +
-                        "echo -n $touchBoostVal > /data/SuiKernel/touch_boost && " +
-                        "echo -n $tenebrionVal > /data/SuiKernel/tenebrion && " +
-                        "echo -n $anyaVal > /data/SuiKernel/anya_thermal && " +
-                        "chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/*"
-
-                runCommand(cmd)
+                if (hasNativeRoot()) {
+                    val output = nativeReadStorage()
+                    if (!output.isNullOrEmpty()) {
+                        output.lines().forEach { line ->
+                            val parts = line.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                map[parts[0].trim()] = parts[1].trim()
+                            }
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        }.start()
+
+            // 2. Fallback to shell command if direct C read returned empty (e.g. su fallback)
+            if (map.isEmpty()) {
+                try {
+                    val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan moona_zram sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
+                    val lines = runCommandWithOutput(cmd)
+                    lines.forEach { line ->
+                        val parts = line.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            map[parts[0].trim()] = parts[1].trim()
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            val touchBoost = map["touch_boost"]
+            val yamadaBoost = touchBoost != "0"
+            val performanceMode = if (touchBoost == "2") "Gaming" else "Balanced"
+
+            val config = SuiKernelConfig(
+                anyaThermal = map["anya_thermal"] != "0",
+                yamadaBoost = yamadaBoost,
+                performanceMode = performanceMode,
+                inahoAudio = map["inaho"] != "0",
+                tenebrion = map["tenebrion"] != "0",
+                airaniCpuset = map["airani"] != "0",
+                sandevistan = map["sandevistan"] == "1",
+                moonaZram = map["moona_zram"] != "0",
+                sparxieEnabled = map["sparxie"] != "0",
+                sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: 30f
+            )
+            cachedConfig = config
+            isLoaded = true
+            return config
+        }
+    }
+
+    fun syncStorage(config: SuiKernelConfig, immediate: Boolean = false) {
+        cachedConfig = config
+        latestConfigToSync = config
+
+        synchronized(storageLock) {
+            pendingSyncTask?.cancel(false)
+            val delayMs = if (immediate) 0L else 100L
+            pendingSyncTask = syncExecutor.schedule({
+                val cfg = latestConfigToSync ?: return@schedule
+                synchronized(storageLock) {
+                    try {
+                        doWriteStorage(cfg)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }, delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        }
     }
 
     fun applyAllSettings(context: android.content.Context? = null) {

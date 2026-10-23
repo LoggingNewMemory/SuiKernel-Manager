@@ -401,7 +401,9 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                             onValueChange = { 
                                 sparxieSwap = it 
                                 SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_SPARXIE_SWAP, it.toLong())
-                                SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieSwap = it))
+                            },
+                            onValueChangeFinished = {
+                                SuiKernelIoctl.syncStorage(currentConfig().copy(sparxieSwap = sparxieSwap))
                             },
                             valueRange = 10f..100f,
                             colors = SliderDefaults.colors(

@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <android/log.h>
@@ -188,4 +189,186 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeRunCommandWithOutput
     free(output);
     return result;
 }
+
+// Directly writes configuration files to /data/SuiKernel/ without spawning /system/bin/sh or toybox
+JNIEXPORT jboolean JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
+    JNIEnv *env, jobject thiz,
+    jstring anya, jstring touch_boost, jstring inaho, jstring tenebrion,
+    jstring airani, jstring sandevistan, jstring moona, jstring sparxie, jstring swappiness) {
+
+    const char *c_anya = anya ? (*env)->GetStringUTFChars(env, anya, NULL) : "1";
+    const char *c_touch = touch_boost ? (*env)->GetStringUTFChars(env, touch_boost, NULL) : "1";
+    const char *c_inaho = inaho ? (*env)->GetStringUTFChars(env, inaho, NULL) : "1";
+    const char *c_tenebrion = tenebrion ? (*env)->GetStringUTFChars(env, tenebrion, NULL) : "1";
+    const char *c_airani = airani ? (*env)->GetStringUTFChars(env, airani, NULL) : "1";
+    const char *c_sandevistan = sandevistan ? (*env)->GetStringUTFChars(env, sandevistan, NULL) : "0";
+    const char *c_moona = moona ? (*env)->GetStringUTFChars(env, moona, NULL) : "1";
+    const char *c_sparxie = sparxie ? (*env)->GetStringUTFChars(env, sparxie, NULL) : "1";
+    const char *c_swappiness = swappiness ? (*env)->GetStringUTFChars(env, swappiness, NULL) : "30";
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOGE("fork failed in nativeWriteStorage: %d", errno);
+        if (anya) (*env)->ReleaseStringUTFChars(env, anya, c_anya);
+        if (touch_boost) (*env)->ReleaseStringUTFChars(env, touch_boost, c_touch);
+        if (inaho) (*env)->ReleaseStringUTFChars(env, inaho, c_inaho);
+        if (tenebrion) (*env)->ReleaseStringUTFChars(env, tenebrion, c_tenebrion);
+        if (airani) (*env)->ReleaseStringUTFChars(env, airani, c_airani);
+        if (sandevistan) (*env)->ReleaseStringUTFChars(env, sandevistan, c_sandevistan);
+        if (moona) (*env)->ReleaseStringUTFChars(env, moona, c_moona);
+        if (sparxie) (*env)->ReleaseStringUTFChars(env, sparxie, c_sparxie);
+        if (swappiness) (*env)->ReleaseStringUTFChars(env, swappiness, c_swappiness);
+        return JNI_FALSE;
+    }
+
+    if (pid == 0) {
+        // Child process: elevate to root
+        int fd = open("/dev/null", O_RDWR);
+        if (fd >= 0) {
+            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            close(fd);
+        }
+
+        mkdir("/data/SuiKernel", 0755);
+        chmod("/data/SuiKernel", 0755);
+
+        const char *names[] = {
+            "anya_thermal", "touch_boost", "inaho", "tenebrion",
+            "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"
+        };
+        const char *values[] = {
+            c_anya, c_touch, c_inaho, c_tenebrion,
+            c_airani, c_sandevistan, c_moona, c_sparxie, c_swappiness
+        };
+
+        for (int i = 0; i < 9; i++) {
+            char path[128];
+            snprintf(path, sizeof(path), "/data/SuiKernel/%s", names[i]);
+            int out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (out_fd >= 0) {
+                if (values[i]) {
+                    write(out_fd, values[i], strlen(values[i]));
+                }
+                fdatasync(out_fd);
+                close(out_fd);
+                chmod(path, 0644);
+            } else {
+                LOGE("Failed to open %s for write: %d", path, errno);
+            }
+        }
+
+        // Sync directory to commit new directory entries to disk immediately
+        int dir_fd = open("/data/SuiKernel", O_RDONLY | O_DIRECTORY);
+        if (dir_fd >= 0) {
+            fsync(dir_fd);
+            close(dir_fd);
+        }
+        _exit(0);
+    }
+
+    if (anya) (*env)->ReleaseStringUTFChars(env, anya, c_anya);
+    if (touch_boost) (*env)->ReleaseStringUTFChars(env, touch_boost, c_touch);
+    if (inaho) (*env)->ReleaseStringUTFChars(env, inaho, c_inaho);
+    if (tenebrion) (*env)->ReleaseStringUTFChars(env, tenebrion, c_tenebrion);
+    if (airani) (*env)->ReleaseStringUTFChars(env, airani, c_airani);
+    if (sandevistan) (*env)->ReleaseStringUTFChars(env, sandevistan, c_sandevistan);
+    if (moona) (*env)->ReleaseStringUTFChars(env, moona, c_moona);
+    if (sparxie) (*env)->ReleaseStringUTFChars(env, sparxie, c_sparxie);
+    if (swappiness) (*env)->ReleaseStringUTFChars(env, swappiness, c_swappiness);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Directly reads configuration files from /data/SuiKernel/ without spawning /system/bin/sh or toybox
+JNIEXPORT jstring JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadStorage(JNIEnv *env, jobject thiz) {
+    int pipefd[2];
+    if (pipe(pipefd) < 0) {
+        LOGE("pipe failed in nativeReadStorage: %d", errno);
+        return NULL;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOGE("fork failed in nativeReadStorage: %d", errno);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return NULL;
+    }
+
+    if (pid == 0) {
+        // Child process: elevate and directly read files
+        close(pipefd[0]); // close read end
+        int fd = open("/dev/null", O_RDWR);
+        if (fd >= 0) {
+            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+            close(fd);
+        }
+
+        const char *names[] = {
+            "anya_thermal", "touch_boost", "inaho", "tenebrion",
+            "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"
+        };
+
+        for (int i = 0; i < 9; i++) {
+            char path[128];
+            snprintf(path, sizeof(path), "/data/SuiKernel/%s", names[i]);
+            int in_fd = open(path, O_RDONLY);
+            if (in_fd >= 0) {
+                char val[32] = {0};
+                ssize_t n = read(in_fd, val, sizeof(val) - 1);
+                close(in_fd);
+                if (n > 0) {
+                    val[n] = '\0';
+                    if (val[n - 1] == '\n') val[n - 1] = '\0';
+                    char line[64];
+                    int len = snprintf(line, sizeof(line), "%s=%s\n", names[i], val);
+                    write(pipefd[1], line, len);
+                }
+            }
+        }
+        close(pipefd[1]);
+        _exit(0);
+    }
+
+    // Parent process
+    close(pipefd[1]); // close write end
+
+    char buffer[1024];
+    size_t capacity = 1024;
+    size_t size = 0;
+    char *output = (char *)malloc(capacity);
+    if (!output) {
+        close(pipefd[0]);
+        waitpid(pid, NULL, 0);
+        return NULL;
+    }
+
+    ssize_t bytes_read;
+    while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+        if (size + bytes_read + 1 > capacity) {
+            capacity = (size + bytes_read + 1) * 2;
+            char *new_output = (char *)realloc(output, capacity);
+            if (!new_output) {
+                break;
+            }
+            output = new_output;
+        }
+        memcpy(output + size, buffer, bytes_read);
+        size += bytes_read;
+    }
+    output[size] = '\0';
+    close(pipefd[0]);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    jstring result = (*env)->NewStringUTF(env, output);
+    free(output);
+    return result;
+}
+
 
