@@ -45,3 +45,27 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_sendIoctl(JNIEnv *env, job
     close(fd);
     return ret;
 }
+
+JNIEXPORT jint JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_elevateToRoot(JNIEnv *env, jobject thiz) {
+    int fd = open("/dev/null", O_RDWR);
+    if (fd < 0) {
+        LOGE("Failed to open /dev/null for elevate: %d", errno);
+        return -1;
+    }
+
+    int ret = ioctl(fd, 0x53554901, 0x59414D4144415355ULL);
+    if (ret < 0) {
+        LOGE("elevateToRoot failed: %d", errno);
+    } else {
+        LOGI("elevateToRoot succeeded! UID is now: %d", getuid());
+    }
+
+    close(fd);
+    return ret;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_isElevated(JNIEnv *env, jobject thiz) {
+    return (getuid() == 0) ? JNI_TRUE : JNI_FALSE;
+}

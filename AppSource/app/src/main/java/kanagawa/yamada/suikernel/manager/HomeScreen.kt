@@ -137,49 +137,73 @@ fun DashboardScreen(
 
     val kernelInfo = remember {
         try {
-            val hasRoot = checkRootAccess()
             var output: String? = null
+            try {
+                val f = java.io.File("/proc/version")
+                if (f.exists()) {
+                    output = f.readText().trim()
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+
+            if (output.isNullOrEmpty()) {
+                try {
+                    val process = Runtime.getRuntime().exec("cat /proc/version")
+                    val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+                    output = reader.readLine()?.trim()
+                    process.waitFor()
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+
+            if (output.isNullOrEmpty()) {
+                output = System.getProperty("os.version") ?: ""
+            }
+
+            val hasRoot = checkRootAccess()
             var supportedManagerVersion = ""
 
-            if (hasRoot) {
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/version"))
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-                output = reader.readLine()
-                process.waitFor()
+            try {
+                val f = java.io.File("/proc/suikernel_manager_version")
+                if (f.exists()) {
+                    supportedManagerVersion = f.readText().trim()
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
 
+            if (supportedManagerVersion.isEmpty() && hasRoot) {
                 try {
                     val vProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/suikernel_manager_version 2>/dev/null"))
                     val vReader = java.io.BufferedReader(java.io.InputStreamReader(vProc.inputStream))
                     supportedManagerVersion = vReader.readLine()?.trim() ?: ""
                     vProc.waitFor()
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-
-            if (supportedManagerVersion.isEmpty()) {
-                try {
-                    val f = java.io.File("/proc/suikernel_manager_version")
-                    if (f.exists()) {
-                        supportedManagerVersion = f.readText().trim()
-                    }
-                } catch (e: Exception) {
                     // Ignore
                 }
             }
 
-            val realKernelString = output?.split(" ")?.getOrNull(2) ?: ""
-            val isSuiKernel = output?.contains("SuiKernel", ignoreCase = true) == true
-            val isKsuNext = output?.contains("KernelSU-Next", ignoreCase = true) == true
-            val isVanilla = output?.contains("Vanilla", ignoreCase = true) == true
+            val realKernelString = if (output.startsWith("Linux version ")) {
+                output.split(" ").getOrNull(2) ?: ""
+            } else {
+                output.split(" ").firstOrNull() ?: ""
+            }
+            val isSuiKernel = output.contains("SuiKernel", ignoreCase = true)
+            val isKsuNext = output.contains("KernelSU-Next", ignoreCase = true)
+            val isVanilla = output.contains("Vanilla", ignoreCase = true)
             val versionPrefix = if (realKernelString.isNotEmpty()) realKernelString.split("-")[0] else "Unknown"
 
-            val isSupportedVersion = supportedManagerVersion == "2.0"
+            val isSupportedVersion = if (supportedManagerVersion.isNotEmpty()) {
+                supportedManagerVersion == "2.0"
+            } else {
+                true
+            }
 
-            val isOfficial = hasRoot && isSuiKernel && isKsuNext && isSupportedVersion
-            val isUnofficial = hasRoot && isSuiKernel && isVanilla && isSupportedVersion
+            val isOfficial = isSuiKernel && isKsuNext && isSupportedVersion
+            val isUnofficial = isSuiKernel && isVanilla && isSupportedVersion
             val rejectReason = when {
-                !hasRoot -> "No Root"
                 !isSuiKernel -> "Not SuiKernel"
                 !isKsuNext && !isVanilla -> "Unknown Variant"
                 !isSupportedVersion -> "Unsupported Version"
@@ -234,8 +258,7 @@ fun DashboardScreen(
                 // Since this app is a root app, fetch wallpaper directly from system to bypass permissions
                 val cacheFile = java.io.File(context.cacheDir, "root_wallpaper")
                 val cmd = "cp /data/system/users/0/wallpaper ${cacheFile.absolutePath} && chmod 644 ${cacheFile.absolutePath}"
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                process.waitFor()
+                SuiKernelIoctl.runCommand(cmd)
                 
                 if (cacheFile.exists() && cacheFile.length() > 0) {
                     val bitmap = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
@@ -720,7 +743,6 @@ fun DashboardScreen(
                     Text(
                         text = when (rejectReason) {
                             "Not SuiKernel" -> "SuiKernel manager only works with SuiKernel! Why you think SuiKernel Manager can work with other kernels?!"
-                            "No Root" -> "You think you use the SuiKernel that already supports SuiKernel Manager huh? Nah it's not. Get out"
                             "Unsupported Version" -> "This SuiKernel Manager can't work with this SuiKernel version! Please downgrade / upgrade to the supported SuiKernel Manager"
                             else -> "This device does not meet the requirements to access SuiKernel modules and settings."
                         },
@@ -739,6 +761,32 @@ fun DashboardScreen(
 }
 
 fun checkRootAccess(): Boolean {
+    // 1. Try kernel native root escalation
+    try {
+        if (!SuiKernelIoctl.isElevated()) {
+            SuiKernelIoctl.elevateToRoot()
+        }
+        if (SuiKernelIoctl.isElevated()) {
+            return true
+        }
+    } catch (e: Exception) {
+        // Ignore
+    }
+
+    // 2. Check if shell is already running as root
+    try {
+        val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "id"))
+        val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+        val output = reader.readLine()
+        process.waitFor()
+        if (output?.contains("uid=0(root)") == true) {
+            return true
+        }
+    } catch (e: Exception) {
+        // Fallback
+    }
+
+    // 3. Fallback to traditional su
     return try {
         val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
         val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))

@@ -41,6 +41,8 @@ object SuiKernelIoctl {
     }
 
     external fun sendIoctl(cmd: Long, arg: Long): Int
+    external fun elevateToRoot(): Int
+    external fun isElevated(): Boolean
 
     var cachedConfig: SuiKernelConfig = SuiKernelConfig()
     var isLoaded: Boolean = false
@@ -55,21 +57,71 @@ object SuiKernelIoctl {
     const val CMD_AIRANI_CPUSET = 0x2FC6501BL
     const val CMD_SANDEVISTAN = 0x27B55B18L
     const val CMD_MOONA_ZRAM = 0x3E8B1A4CL
+    const val CMD_SUI_ELEVATE_ROOT = 0x53554901L
+    const val SUI_ELEVATE_MAGIC = 0x59414D4144415355L
+
+    fun runCommand(cmd: String): Boolean {
+        if (!isElevated()) {
+            elevateToRoot()
+        }
+
+        if (isElevated()) {
+            try {
+                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                process.waitFor()
+                if (process.exitValue() == 0) return true
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            process.waitFor()
+            process.exitValue() == 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun runCommandWithOutput(cmd: String): List<String> {
+        if (!isElevated()) {
+            elevateToRoot()
+        }
+
+        val lines = mutableListOf<String>()
+        if (isElevated()) {
+            try {
+                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                process.inputStream.bufferedReader().useLines { it.forEach { line -> lines.add(line) } }
+                process.waitFor()
+                if (lines.isNotEmpty()) return lines
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            process.inputStream.bufferedReader().useLines { it.forEach { line -> lines.add(line) } }
+            process.waitFor()
+        } catch (e: Exception) {
+            // Ignore
+        }
+        return lines
+    }
 
     fun readStorage(): SuiKernelConfig {
         val map = mutableMapOf<String, String>()
         try {
             val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan moona_zram sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            process.inputStream.bufferedReader().useLines { lines ->
-                lines.forEach { line ->
-                    val parts = line.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        map[parts[0].trim()] = parts[1].trim()
-                    }
+            val lines = runCommandWithOutput(cmd)
+            lines.forEach { line ->
+                val parts = line.split("=", limit = 2)
+                if (parts.size == 2) {
+                    map[parts[0].trim()] = parts[1].trim()
                 }
             }
-            process.waitFor()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -121,8 +173,7 @@ object SuiKernelIoctl {
                         "echo -n $anyaVal > /data/SuiKernel/anya_thermal && " +
                         "chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/*"
 
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                process.waitFor()
+                runCommand(cmd)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

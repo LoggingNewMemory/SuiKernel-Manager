@@ -172,17 +172,18 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     fun loadLocalModules() {
         coroutineScope.launch(Dispatchers.IO) {
             val ksudOk = try {
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "which ksud >/dev/null 2>&1 || [ -x /data/adb/ksud ] || [ -f /data/adb/ksud ]"))
-                p.waitFor() == 0
+                SuiKernelIoctl.runCommand("which ksud >/dev/null 2>&1 || [ -x /data/adb/ksud ] || [ -f /data/adb/ksud ]")
             } catch (e: Exception) {
                 false
             }
             val vanilla = try {
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/version"))
-                val r = BufferedReader(InputStreamReader(p.inputStream))
-                val line = r.readLine()
-                p.waitFor()
-                line?.contains("Vanilla", ignoreCase = true) == true
+                val f = File("/proc/version")
+                val line = if (f.exists()) {
+                    f.readText()
+                } else {
+                    System.getProperty("os.version") ?: ""
+                }
+                line.contains("Vanilla", ignoreCase = true)
             } catch (e: Exception) {
                 false
             }
@@ -603,7 +604,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                                             zipFile.delete()
                                         }
                                         // Root rm cleanup as guaranteed fallback
-                                        Runtime.getRuntime().exec(arrayOf("su", "-c", "rm -f '${zipFile.absolutePath}'")).waitFor()
+                                        SuiKernelIoctl.runCommand("rm -f '${zipFile.absolutePath}'")
                                     } catch (e: Exception) {
                                         e.printStackTrace()
                                     }
