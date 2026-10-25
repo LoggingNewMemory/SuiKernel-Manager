@@ -42,8 +42,8 @@ object SuiKernelIoctl {
 
     external fun sendIoctl(cmd: Long, arg: Long): Int
     external fun hasNativeRoot(): Boolean
-    external fun nativeRunCommand(cmd: String): Int
-    external fun nativeRunCommandWithOutput(cmd: String): String?
+    external fun nativeReadProcVersion(): String?
+    external fun nativeReadManagerVersion(): String?
     external fun nativeWriteFeature(name: String, value: String): Boolean
     external fun nativeWriteStorage(
         anya: String,
@@ -58,6 +58,22 @@ object SuiKernelIoctl {
     ): Boolean
     external fun nativeReadStorage(): String?
 
+    fun readProcVersion(): String? {
+        return try {
+            nativeReadProcVersion()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun readManagerVersion(): String? {
+        return try {
+            nativeReadManagerVersion()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     var cachedConfig: SuiKernelConfig = SuiKernelConfig()
     var isLoaded: Boolean = false
 
@@ -65,17 +81,18 @@ object SuiKernelIoctl {
     private var nativeRootAvailable: Boolean? = null
 
     fun isNativeRootSupported(): Boolean {
-        nativeRootAvailable?.let { return it }
+        if (nativeRootAvailable == true) return true
         return synchronized(this) {
-            nativeRootAvailable ?: run {
-                val supported = try {
-                    hasNativeRoot()
-                } catch (e: Exception) {
-                    false
-                }
-                nativeRootAvailable = supported
-                supported
+            if (nativeRootAvailable == true) return true
+            val supported = try {
+                hasNativeRoot()
+            } catch (e: Exception) {
+                false
             }
+            if (supported) {
+                nativeRootAvailable = true
+            }
+            supported
         }
     }
 
@@ -95,19 +112,18 @@ object SuiKernelIoctl {
     const val SUI_ELEVATE_MAGIC = 0x59414D4144415355L
 
     fun runCommand(cmd: String): Boolean {
-        // 1. Try kernel native root escalation in a child process
+        // 1. Try su
         try {
-            if (isNativeRootSupported()) {
-                val ret = nativeRunCommand(cmd)
-                if (ret == 0) return true
-            }
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            process.waitFor()
+            if (process.exitValue() == 0) return true
         } catch (e: Exception) {
-            e.printStackTrace()
+            // su not found
         }
 
-        // 2. Fallback to su
+        // 2. Try sh fallback (for elevated Yamada SU / Vanilla)
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
             process.waitFor()
             process.exitValue() == 0
         } catch (e: Exception) {
@@ -116,46 +132,54 @@ object SuiKernelIoctl {
     }
 
     fun runCommandWithOutput(cmd: String): List<String> {
-        // 1. Try kernel native root escalation in a child process
-        try {
-            if (isNativeRootSupported()) {
-                val output = nativeRunCommandWithOutput(cmd)
-                if (output != null) {
-                    return output.lines().filter { it.isNotEmpty() }
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 2. Fallback to su
         val lines = mutableListOf<String>()
+
+        // 1. Try su
         try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
             process.inputStream.bufferedReader().useLines { it.forEach { line -> lines.add(line) } }
             process.waitFor()
+            if (process.exitValue() == 0 && lines.isNotEmpty()) {
+                return lines
+            }
         } catch (e: Exception) {
-            // Ignore
+            // su not found
         }
+
+        // 2. Try sh fallback (for elevated Yamada SU / Vanilla)
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+            val shLines = mutableListOf<String>()
+            process.inputStream.bufferedReader().useLines { it.forEach { line -> shLines.add(line) } }
+            process.waitFor()
+            if (shLines.isNotEmpty()) {
+                return shLines
+            }
+        } catch (e: Exception) {
+            // sh error
+        }
+
         return lines
     }
 
     fun runTerminalCommand(cmd: String): String {
-        // 1. Try kernel native root escalation in a child process
+        // 1. Try su
         try {
-            if (isNativeRootSupported()) {
-                val output = nativeRunCommandWithOutput(cmd)
-                if (output != null) {
-                    return output.ifEmpty { "(Command completed with no output)" }
-                }
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val out = process.inputStream.bufferedReader().readText()
+            val err = process.errorStream.bufferedReader().readText()
+            process.waitFor()
+            if (process.exitValue() == 0 || out.isNotEmpty()) {
+                val combined = (out + if (err.isNotEmpty()) "\n$err" else "").trim()
+                return combined.ifEmpty { "(Command completed with no output)" }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            // su not available
         }
 
-        // 2. Fallback to su
+        // 2. Try sh fallback (for elevated Yamada SU / Vanilla)
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
             val out = process.inputStream.bufferedReader().readText()
             val err = process.errorStream.bufferedReader().readText()
             process.waitFor()
@@ -249,7 +273,7 @@ object SuiKernelIoctl {
     private fun doReadStorage(): SuiKernelConfig {
         val map = mutableMapOf<String, String>()
 
-        // 1. First priority: direct C filesystem read from /data/SuiKernel/ (no sh / toybox)
+        // 1. First priority: direct C filesystem read from /data/SuiKernel/
         try {
             if (isNativeRootSupported()) {
                 val output = nativeReadStorage()
@@ -266,7 +290,7 @@ object SuiKernelIoctl {
             e.printStackTrace()
         }
 
-        // 2. Fallback to shell command if direct C read returned empty (e.g. su fallback)
+        // 2. Fallback to shell command if direct C read returned empty
         if (map.isEmpty()) {
             try {
                 val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan moona_zram sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"

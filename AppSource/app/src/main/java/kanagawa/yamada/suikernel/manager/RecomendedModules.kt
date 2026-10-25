@@ -173,17 +173,8 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
         coroutineScope.launch(Dispatchers.IO) {
             val ksudPath = SuiKernelIoctl.runCommandWithOutput("which ksud").firstOrNull()?.trim()
             val ksudOk = !ksudPath.isNullOrEmpty()
-            val vanilla = try {
-                val f = File("/proc/version")
-                val line = if (f.exists()) {
-                    f.readText()
-                } else {
-                    System.getProperty("os.version") ?: ""
-                }
-                line.contains("Vanilla", ignoreCase = true)
-            } catch (e: Exception) {
-                false
-            }
+            val versionStr = SuiKernelIoctl.readProcVersion() ?: SuiKernelIoctl.runCommandWithOutput("cat /proc/version").firstOrNull() ?: ""
+            val vanilla = versionStr.contains("Vanilla", ignoreCase = true)
 
             withContext(Dispatchers.Main) {
                 isKsudAvailable = ksudOk

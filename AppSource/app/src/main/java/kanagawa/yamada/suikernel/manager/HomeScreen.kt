@@ -139,21 +139,29 @@ fun DashboardScreen(
     val kernelInfo = remember {
         try {
             var output: String? = null
+            // 1. Direct native elevated read
             try {
-                val f = java.io.File("/proc/version")
-                if (f.exists()) {
-                    output = f.readText().trim()
-                }
+                output = SuiKernelIoctl.readProcVersion()?.trim()
             } catch (e: Exception) {
                 // Ignore
             }
 
+            // 2. Persistent root shell read
             if (output.isNullOrEmpty()) {
                 try {
-                    val process = Runtime.getRuntime().exec("cat /proc/version")
-                    val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-                    output = reader.readLine()?.trim()
-                    process.waitFor()
+                    output = SuiKernelIoctl.runCommandWithOutput("cat /proc/version").firstOrNull()?.trim()
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+
+            // 3. Direct file read fallback
+            if (output.isNullOrEmpty()) {
+                try {
+                    val f = java.io.File("/proc/version")
+                    if (f.exists()) {
+                        output = f.readText().trim()
+                    }
                 } catch (e: Exception) {
                     // Ignore
                 }
@@ -166,23 +174,18 @@ fun DashboardScreen(
             val hasRoot = checkRootAccess()
             var supportedManagerVersion = ""
 
-            try {
-                val f = java.io.File("/proc/suikernel_manager_version")
-                if (f.exists()) {
-                    supportedManagerVersion = f.readText().trim()
-                }
-            } catch (e: Exception) {
-                // Ignore
-            }
-
-            if (supportedManagerVersion.isEmpty() && hasRoot) {
+            if (hasRoot) {
                 try {
-                    val vProc = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat /proc/suikernel_manager_version 2>/dev/null"))
-                    val vReader = java.io.BufferedReader(java.io.InputStreamReader(vProc.inputStream))
-                    supportedManagerVersion = vReader.readLine()?.trim() ?: ""
-                    vProc.waitFor()
+                    supportedManagerVersion = SuiKernelIoctl.readManagerVersion()?.trim() ?: ""
                 } catch (e: Exception) {
                     // Ignore
+                }
+                if (supportedManagerVersion.isEmpty()) {
+                    try {
+                        supportedManagerVersion = SuiKernelIoctl.runCommandWithOutput("cat /proc/suikernel_manager_version 2>/dev/null").firstOrNull()?.trim() ?: ""
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
                 }
             }
 
@@ -807,7 +810,7 @@ fun DashboardScreen(
 }
 
 fun checkRootAccess(): Boolean {
-    // 1. Try kernel native root escalation in a child process
+    // 1. Check native root escalation directly from SuiKernel
     try {
         if (SuiKernelIoctl.isNativeRootSupported()) {
             return true

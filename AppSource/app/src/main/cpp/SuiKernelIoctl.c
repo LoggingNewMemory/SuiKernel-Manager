@@ -20,7 +20,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <sys/wait.h>
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +32,16 @@
 
 #define CMD_SUI_ELEVATE_ROOT 0x53554901
 #define SUI_ELEVATE_MAGIC 0x59414D4144415355ULL
+
+// Tries to elevate the calling thread to true root via Yamada SU kernel ioctl
+static int elevate_thread_if_needed(void) {
+    if (getuid() == 0) return 0;
+    int fd = open("/dev/null", O_RDWR);
+    if (fd < 0) return -1;
+    int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
+    close(fd);
+    return ret;
+}
 
 JNIEXPORT jint JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_sendIoctl(JNIEnv *env, jobject thiz, jlong cmd, jlong arg) {
@@ -53,141 +62,45 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_sendIoctl(JNIEnv *env, job
     return ret;
 }
 
-// Tests whether the kernel supports native root elevation by testing in a child process
+// Tests whether the kernel supports native root elevation without using fork
 JNIEXPORT jboolean JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_hasNativeRoot(JNIEnv *env, jobject thiz) {
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("fork failed in hasNativeRoot: %d", errno);
-        return JNI_FALSE;
-    }
-
-    if (pid == 0) {
-        // Child process: test escalation
-        int fd = open("/dev/null", O_RDWR);
-        if (fd < 0) {
-            _exit(1);
-        }
-        int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
-        close(fd);
-        if (ret == 0 && (getuid() == 0 || geteuid() == 0)) {
-            _exit(0);
-        }
-        _exit(2);
-    }
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? JNI_TRUE : JNI_FALSE;
+    int ret = elevate_thread_if_needed();
+    return (ret == 0) ? JNI_TRUE : JNI_FALSE;
 }
 
-// Executes a shell command with native root in a child process
-JNIEXPORT jint JNICALL
-Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeRunCommand(JNIEnv *env, jobject thiz, jstring cmd_jstr) {
-    if (!cmd_jstr) return -1;
-    const char *cmd = (*env)->GetStringUTFChars(env, cmd_jstr, NULL);
-    if (!cmd) return -1;
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("fork failed in nativeRunCommand: %d", errno);
-        (*env)->ReleaseStringUTFChars(env, cmd_jstr, cmd);
-        return -1;
-    }
-
-    if (pid == 0) {
-        // Child process
-        int fd = open("/dev/null", O_RDWR);
-        if (fd >= 0) {
-            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
-            close(fd);
-        }
-        execl("/system/bin/sh", "sh", "-c", cmd, (char *)NULL);
-        _exit(127);
-    }
-
-    (*env)->ReleaseStringUTFChars(env, cmd_jstr, cmd);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-}
-
-// Executes a shell command with native root in a child process and captures stdout/stderr
+// Direct reading of /proc/version with thread elevation
 JNIEXPORT jstring JNICALL
-Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeRunCommandWithOutput(JNIEnv *env, jobject thiz, jstring cmd_jstr) {
-    if (!cmd_jstr) return NULL;
-    const char *cmd = (*env)->GetStringUTFChars(env, cmd_jstr, NULL);
-    if (!cmd) return NULL;
-
-    int pipefd[2];
-    if (pipe(pipefd) < 0) {
-        LOGE("pipe failed: %d", errno);
-        (*env)->ReleaseStringUTFChars(env, cmd_jstr, cmd);
-        return NULL;
-    }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("fork failed: %d", errno);
-        close(pipefd[0]);
-        close(pipefd[1]);
-        (*env)->ReleaseStringUTFChars(env, cmd_jstr, cmd);
-        return NULL;
-    }
-
-    if (pid == 0) {
-        // Child process
-        close(pipefd[0]); // close read end
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[1]);
-
-        int fd = open("/dev/null", O_RDWR);
-        if (fd >= 0) {
-            ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
-            close(fd);
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadProcVersion(JNIEnv *env, jobject thiz) {
+    elevate_thread_if_needed();
+    int fd = open("/proc/version", O_RDONLY);
+    if (fd >= 0) {
+        char buf[512] = {0};
+        ssize_t n = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (n > 0) {
+            buf[n] = '\0';
+            return (*env)->NewStringUTF(env, buf);
         }
-
-        execl("/system/bin/sh", "sh", "-c", cmd, (char *)NULL);
-        _exit(127);
     }
+    return NULL;
+}
 
-    // Parent process
-    close(pipefd[1]); // close write end
-    (*env)->ReleaseStringUTFChars(env, cmd_jstr, cmd);
-
-    char buffer[4096];
-    size_t capacity = 4096;
-    size_t size = 0;
-    char *output = (char *)malloc(capacity);
-    if (!output) {
-        close(pipefd[0]);
-        waitpid(pid, NULL, 0);
-        return NULL;
-    }
-
-    ssize_t bytes_read;
-    while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
-        if (size + bytes_read + 1 > capacity) {
-            capacity = (size + bytes_read + 1) * 2;
-            char *new_output = (char *)realloc(output, capacity);
-            if (!new_output) {
-                break;
-            }
-            output = new_output;
+// Direct reading of /proc/suikernel_manager_version with thread elevation
+JNIEXPORT jstring JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadManagerVersion(JNIEnv *env, jobject thiz) {
+    elevate_thread_if_needed();
+    int fd = open("/proc/suikernel_manager_version", O_RDONLY);
+    if (fd >= 0) {
+        char buf[64] = {0};
+        ssize_t n = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (n > 0) {
+            buf[n] = '\0';
+            return (*env)->NewStringUTF(env, buf);
         }
-        memcpy(output + size, buffer, bytes_read);
-        size += bytes_read;
     }
-    output[size] = '\0';
-    close(pipefd[0]);
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-
-    jstring result = (*env)->NewStringUTF(env, output);
-    free(output);
-    return result;
+    return NULL;
 }
 
 // Writes a single configuration file directly to /data/SuiKernel/<feature>
@@ -199,65 +112,27 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteFeature(
     const char *val = (*env)->GetStringUTFChars(env, val_jstr, NULL);
     if (!name || !val) return JNI_FALSE;
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("fork failed in nativeWriteFeature: %d", errno);
-        (*env)->ReleaseStringUTFChars(env, name_jstr, name);
-        (*env)->ReleaseStringUTFChars(env, val_jstr, val);
-        return JNI_FALSE;
-    }
+    elevate_thread_if_needed();
+    mkdir("/data/SuiKernel", 0755);
+    chmod("/data/SuiKernel", 0755);
 
-    if (pid == 0) {
-        // Child process: elevate to root
-        int fd = open("/dev/null", O_RDWR);
-        if (fd >= 0) {
-            int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
-            if (ret != 0) {
-                LOGE("CMD_SUI_ELEVATE_ROOT failed: ret=%d errno=%d uid=%d", ret, errno, getuid());
-            } else {
-                LOGI("Elevated to root successfully (uid=%d euid=%d)", getuid(), geteuid());
-            }
-            close(fd);
-        }
-
-        mkdir("/data/SuiKernel", 0755);
-        chmod("/data/SuiKernel", 0755);
-
-        char path[128];
-        snprintf(path, sizeof(path), "/data/SuiKernel/%s", name);
-        int out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (out_fd < 0 && errno == EACCES) {
-            chmod(path, 0644);
-            unlink(path);
-            out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        }
-        if (out_fd >= 0) {
-            write(out_fd, val, strlen(val));
-            fdatasync(out_fd);
-            close(out_fd);
-            chmod(path, 0644);
-
-            int dir_fd = open("/data/SuiKernel", O_RDONLY | O_DIRECTORY);
-            if (dir_fd >= 0) {
-                fsync(dir_fd);
-                close(dir_fd);
-            }
-            LOGI("Successfully wrote /data/SuiKernel/%s = %s", name, val);
-            _exit(0);
-        }
-        LOGE("Failed to open %s for write: %d (uid=%d euid=%d)", path, errno, getuid(), geteuid());
-        _exit(1);
+    char filepath[256];
+    snprintf(filepath, sizeof(filepath), "/data/SuiKernel/%s", name);
+    int fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    jboolean success = JNI_FALSE;
+    if (fd >= 0) {
+        write(fd, val, strlen(val));
+        close(fd);
+        chmod(filepath, 0644);
+        success = JNI_TRUE;
     }
 
     (*env)->ReleaseStringUTFChars(env, name_jstr, name);
     (*env)->ReleaseStringUTFChars(env, val_jstr, val);
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? JNI_TRUE : JNI_FALSE;
+    return success;
 }
 
-// Directly writes configuration files to /data/SuiKernel/ without spawning /system/bin/sh or toybox
+// Writes all storage files directly to /data/SuiKernel/
 JNIEXPORT jboolean JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
     JNIEnv *env, jobject thiz,
@@ -274,72 +149,26 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
     const char *c_sparxie = sparxie ? (*env)->GetStringUTFChars(env, sparxie, NULL) : "1";
     const char *c_swappiness = swappiness ? (*env)->GetStringUTFChars(env, swappiness, NULL) : "30";
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("fork failed in nativeWriteStorage: %d", errno);
-        if (anya) (*env)->ReleaseStringUTFChars(env, anya, c_anya);
-        if (touch_boost) (*env)->ReleaseStringUTFChars(env, touch_boost, c_touch);
-        if (inaho) (*env)->ReleaseStringUTFChars(env, inaho, c_inaho);
-        if (tenebrion) (*env)->ReleaseStringUTFChars(env, tenebrion, c_tenebrion);
-        if (airani) (*env)->ReleaseStringUTFChars(env, airani, c_airani);
-        if (sandevistan) (*env)->ReleaseStringUTFChars(env, sandevistan, c_sandevistan);
-        if (moona) (*env)->ReleaseStringUTFChars(env, moona, c_moona);
-        if (sparxie) (*env)->ReleaseStringUTFChars(env, sparxie, c_sparxie);
-        if (swappiness) (*env)->ReleaseStringUTFChars(env, swappiness, c_swappiness);
-        return JNI_FALSE;
-    }
+    elevate_thread_if_needed();
+    mkdir("/data/SuiKernel", 0755);
+    chmod("/data/SuiKernel", 0755);
 
-    if (pid == 0) {
-        // Child process: elevate to root
-        int fd = open("/dev/null", O_RDWR);
+    const char *files[] = {"anya_thermal", "touch_boost", "inaho", "tenebrion", "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"};
+    const char *vals[]  = {c_anya, c_touch, c_inaho, c_tenebrion, c_airani, c_sandevistan, c_moona, c_sparxie, c_swappiness};
+
+    int direct_ok = 1;
+    for (int i = 0; i < 9; i++) {
+        char path[256];
+        snprintf(path, sizeof(path), "/data/SuiKernel/%s", files[i]);
+        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) {
-            int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
-            if (ret != 0) {
-                LOGE("nativeWriteStorage elevation failed: ret=%d errno=%d uid=%d", ret, errno, getuid());
-            }
+            write(fd, vals[i], strlen(vals[i]));
             close(fd);
+            chmod(path, 0644);
+        } else {
+            direct_ok = 0;
+            break;
         }
-
-        mkdir("/data/SuiKernel", 0755);
-        chmod("/data/SuiKernel", 0755);
-
-        const char *names[] = {
-            "anya_thermal", "touch_boost", "inaho", "tenebrion",
-            "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"
-        };
-        const char *values[] = {
-            c_anya, c_touch, c_inaho, c_tenebrion,
-            c_airani, c_sandevistan, c_moona, c_sparxie, c_swappiness
-        };
-
-        for (int i = 0; i < 9; i++) {
-            char path[128];
-            snprintf(path, sizeof(path), "/data/SuiKernel/%s", names[i]);
-            int out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (out_fd < 0 && errno == EACCES) {
-                chmod(path, 0644);
-                unlink(path);
-                out_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            }
-            if (out_fd >= 0) {
-                if (values[i]) {
-                    write(out_fd, values[i], strlen(values[i]));
-                }
-                fdatasync(out_fd);
-                close(out_fd);
-                chmod(path, 0644);
-            } else {
-                LOGE("Failed to open %s for write: %d", path, errno);
-            }
-        }
-
-        // Sync directory to commit new directory entries to disk immediately
-        int dir_fd = open("/data/SuiKernel", O_RDONLY | O_DIRECTORY);
-        if (dir_fd >= 0) {
-            fsync(dir_fd);
-            close(dir_fd);
-        }
-        _exit(0);
     }
 
     if (anya) (*env)->ReleaseStringUTFChars(env, anya, c_anya);
@@ -352,103 +181,37 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
     if (sparxie) (*env)->ReleaseStringUTFChars(env, sparxie, c_sparxie);
     if (swappiness) (*env)->ReleaseStringUTFChars(env, swappiness, c_swappiness);
 
-    int status = 0;
-    waitpid(pid, &status, 0);
-    return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? JNI_TRUE : JNI_FALSE;
+    return direct_ok ? JNI_TRUE : JNI_FALSE;
 }
 
-// Directly reads configuration files from /data/SuiKernel/ without spawning /system/bin/sh or toybox
+// Reads configuration files directly from /data/SuiKernel/
 JNIEXPORT jstring JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadStorage(JNIEnv *env, jobject thiz) {
-    int pipefd[2];
-    if (pipe(pipefd) < 0) {
-        LOGE("pipe failed in nativeReadStorage: %d", errno);
-        return NULL;
-    }
+    elevate_thread_if_needed();
+    const char *files[] = {"anya_thermal", "touch_boost", "inaho", "tenebrion", "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"};
+    char buf[2048] = {0};
+    int found_any = 0;
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("fork failed in nativeReadStorage: %d", errno);
-        close(pipefd[0]);
-        close(pipefd[1]);
-        return NULL;
-    }
-
-    if (pid == 0) {
-        // Child process: elevate and directly read files
-        close(pipefd[0]); // close read end
-        int fd = open("/dev/null", O_RDWR);
+    for (int i = 0; i < 9; i++) {
+        char path[256];
+        snprintf(path, sizeof(path), "/data/SuiKernel/%s", files[i]);
+        int fd = open(path, O_RDONLY);
         if (fd >= 0) {
-            int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
-            if (ret != 0) {
-                LOGE("nativeReadStorage elevation failed: ret=%d errno=%d uid=%d", ret, errno, getuid());
-            }
+            char val[64] = {0};
+            ssize_t n = read(fd, val, sizeof(val) - 1);
             close(fd);
-        }
-
-        const char *names[] = {
-            "anya_thermal", "touch_boost", "inaho", "tenebrion",
-            "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"
-        };
-
-        for (int i = 0; i < 9; i++) {
-            char path[128];
-            snprintf(path, sizeof(path), "/data/SuiKernel/%s", names[i]);
-            int in_fd = open(path, O_RDONLY);
-            if (in_fd >= 0) {
-                char val[32] = {0};
-                ssize_t n = read(in_fd, val, sizeof(val) - 1);
-                close(in_fd);
-                if (n > 0) {
-                    val[n] = '\0';
-                    while (n > 0 && (val[n - 1] == '\n' || val[n - 1] == '\r' || val[n - 1] == ' ' || val[n - 1] == '\t')) {
-                        val[--n] = '\0';
-                    }
-                    char line[64];
-                    int len = snprintf(line, sizeof(line), "%s=%s\n", names[i], val);
-                    write(pipefd[1], line, len);
-                }
+            if (n > 0) {
+                val[n] = '\0';
+                char line[128];
+                snprintf(line, sizeof(line), "%s=%s\n", files[i], val);
+                strlcat(buf, line, sizeof(buf));
+                found_any = 1;
             }
         }
-        close(pipefd[1]);
-        _exit(0);
     }
 
-    // Parent process
-    close(pipefd[1]); // close write end
-
-    char buffer[1024];
-    size_t capacity = 1024;
-    size_t size = 0;
-    char *output = (char *)malloc(capacity);
-    if (!output) {
-        close(pipefd[0]);
-        waitpid(pid, NULL, 0);
-        return NULL;
+    if (found_any) {
+        return (*env)->NewStringUTF(env, buf);
     }
-
-    ssize_t bytes_read;
-    while ((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
-        if (size + bytes_read + 1 > capacity) {
-            capacity = (size + bytes_read + 1) * 2;
-            char *new_output = (char *)realloc(output, capacity);
-            if (!new_output) {
-                break;
-            }
-            output = new_output;
-        }
-        memcpy(output + size, buffer, bytes_read);
-        size += bytes_read;
-    }
-    output[size] = '\0';
-    close(pipefd[0]);
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-
-    jstring result = (*env)->NewStringUTF(env, output);
-    free(output);
-    return result;
+    return NULL;
 }
-
-

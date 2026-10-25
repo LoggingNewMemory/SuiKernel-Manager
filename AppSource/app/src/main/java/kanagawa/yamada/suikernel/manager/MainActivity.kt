@@ -41,8 +41,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         
-        // Warm up config cache in background so settings screen has immediate accurate state
+        // Warm up Yamada SU root session & config cache in background
         Thread {
+            SuiKernelIoctl.isNativeRootSupported()
             SuiKernelIoctl.readStorage()
         }.start()
 
