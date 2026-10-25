@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
                         targetState = currentScreen,
                         label = "ScreenTransition",
                         transitionSpec = {
-                            if ((targetState == "Settings" || targetState == "RecomendedModules") && initialState == "Dashboard") {
+                            if ((targetState == "Settings" || targetState == "RecomendedModules" || targetState == "Terminal") && initialState == "Dashboard") {
                                 (slideInHorizontally(
                                     animationSpec = tween(300),
                                     initialOffsetX = { fullWidth -> fullWidth }
@@ -84,10 +84,12 @@ class MainActivity : ComponentActivity() {
                         when (targetScreen) {
                             "Dashboard" -> DashboardScreen(
                                 onNavigateToSettings = { currentScreen = "Settings" },
-                                onNavigateToRecomendedModules = { currentScreen = "RecomendedModules" }
+                                onNavigateToRecomendedModules = { currentScreen = "RecomendedModules" },
+                                onNavigateToTerminal = { currentScreen = "Terminal" }
                             )
                             "Settings" -> SuiKernelSettingsScreen(onNavigateBack = { currentScreen = "Dashboard" })
                             "RecomendedModules" -> RecomendedModulesScreen(onNavigateBack = { currentScreen = "Dashboard" })
+                            "Terminal" -> SuiTerminalScreen(onNavigateBack = { currentScreen = "Dashboard" })
                         }
                     }
                 }

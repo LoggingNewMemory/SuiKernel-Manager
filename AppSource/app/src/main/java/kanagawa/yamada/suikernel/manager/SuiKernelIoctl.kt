@@ -140,6 +140,32 @@ object SuiKernelIoctl {
         return lines
     }
 
+    fun runTerminalCommand(cmd: String): String {
+        // 1. Try kernel native root escalation in a child process
+        try {
+            if (isNativeRootSupported()) {
+                val output = nativeRunCommandWithOutput(cmd)
+                if (output != null) {
+                    return output.ifEmpty { "(Command completed with no output)" }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 2. Fallback to su
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val out = process.inputStream.bufferedReader().readText()
+            val err = process.errorStream.bufferedReader().readText()
+            process.waitFor()
+            val combined = (out + if (err.isNotEmpty()) "\n$err" else "").trim()
+            if (combined.isNotEmpty()) combined else if (process.exitValue() == 0) "(Command completed with no output)" else "Exit code: ${process.exitValue()}"
+        } catch (e: Exception) {
+            "Error: ${e.message}"
+        }
+    }
+
     private fun updateCache(name: String, value: String) {
         cachedConfig = when (name) {
             "anya_thermal" -> cachedConfig.copy(anyaThermal = value != "0")
@@ -279,16 +305,9 @@ object SuiKernelIoctl {
             return config
         }
 
-        // If map is empty and we already have a loaded config in memory, do NOT revert to default ON!
-        if (isLoaded) {
-            return cachedConfig
-        }
-
-        val config = SuiKernelConfig()
-        cachedConfig = config
-        isLoaded = true
-        doWriteStorage(config)
-        return config
+        // If map is empty, do NOT overwrite disk with default configs!
+        // Return existing cachedConfig to preserve user settings.
+        return cachedConfig
     }
 
     fun readStorage(): SuiKernelConfig {

@@ -130,16 +130,9 @@ fun setLastUpdateCheckTime(context: Context, timestamp: Long = System.currentTim
 fun fetchInstalledModules(): List<InstalledModuleInfo> {
     val list = mutableListOf<InstalledModuleInfo>()
     try {
-        val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "ksud module list 2>/dev/null || /data/adb/ksud module list"))
-        val reader = BufferedReader(InputStreamReader(process.inputStream))
-        val sb = StringBuilder()
-        var line: String?
-        while (reader.readLine().also { line = it } != null) {
-            sb.append(line).append("\n")
-        }
-        process.waitFor()
-
-        val jsonStr = sb.toString().trim()
+        val ksudBin = SuiKernelIoctl.runCommandWithOutput("which ksud").firstOrNull()?.trim() ?: "ksud"
+        val lines = SuiKernelIoctl.runCommandWithOutput("$ksudBin module list")
+        val jsonStr = lines.joinToString("\n").trim()
         if (jsonStr.startsWith("[") && jsonStr.endsWith("]")) {
             val arr = JSONArray(jsonStr)
             for (i in 0 until arr.length()) {
@@ -1019,14 +1012,10 @@ fun downloadModuleZip(context: Context, downloadUrl: String, onProgress: (Int) -
 
 fun flashModuleZip(zipFile: File, onLine: (String) -> Unit) {
     try {
-        val cmd = "ksud module install ${zipFile.absolutePath} 2>&1 || /data/adb/ksud module install ${zipFile.absolutePath} 2>&1"
-        val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-        val reader = BufferedReader(InputStreamReader(process.inputStream))
-        var line: String?
-        while (reader.readLine().also { line = it } != null) {
-            onLine(line ?: "")
-        }
-        process.waitFor()
+        val ksudBin = SuiKernelIoctl.runCommandWithOutput("which ksud").firstOrNull()?.trim() ?: "ksud"
+        val cmd = "$ksudBin module install ${zipFile.absolutePath} 2>&1"
+        val output = SuiKernelIoctl.runTerminalCommand(cmd)
+        output.lines().forEach { onLine(it) }
     } catch (e: Exception) {
         e.printStackTrace()
         onLine("Error executing ksud: ${e.message}")

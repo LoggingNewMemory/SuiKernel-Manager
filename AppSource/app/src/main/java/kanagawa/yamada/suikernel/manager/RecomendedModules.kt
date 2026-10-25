@@ -171,11 +171,8 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 
     fun loadLocalModules() {
         coroutineScope.launch(Dispatchers.IO) {
-            val ksudOk = try {
-                SuiKernelIoctl.runCommand("which ksud >/dev/null 2>&1 || [ -x /data/adb/ksud ] || [ -f /data/adb/ksud ]")
-            } catch (e: Exception) {
-                false
-            }
+            val ksudPath = SuiKernelIoctl.runCommandWithOutput("which ksud").firstOrNull()?.trim()
+            val ksudOk = !ksudPath.isNullOrEmpty()
             val vanilla = try {
                 val f = File("/proc/version")
                 val line = if (f.exists()) {

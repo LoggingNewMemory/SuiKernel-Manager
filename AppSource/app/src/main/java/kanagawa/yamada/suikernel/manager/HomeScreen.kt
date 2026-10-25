@@ -96,7 +96,8 @@ data class KernelDisplayInfo(
 @Composable
 fun DashboardScreen(
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToRecomendedModules: () -> Unit = {}
+    onNavigateToRecomendedModules: () -> Unit = {},
+    onNavigateToTerminal: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val wallpaperBitmap by WallpaperCache.bitmap
@@ -653,6 +654,8 @@ fun DashboardScreen(
                 }
             }
 
+
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // SuiKernel Settings
@@ -700,6 +703,47 @@ fun DashboardScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Terminal Emulator
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToTerminal() },
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Terminal Emulator",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "This added because The Dev needs to check",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Light,
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
+                        contentDescription = "Right Arrow",
+                        tint = TextSecondary,
+                        modifier = Modifier.height(16.dp)
+                    )
+                }
+            }
+
+
         } else {
             // Rejection Banner Card
             Card(
