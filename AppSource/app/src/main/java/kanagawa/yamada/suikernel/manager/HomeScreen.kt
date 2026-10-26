@@ -66,18 +66,35 @@ private const val PREFS_UI = "ui_preferences"
 private const val KEY_WALLPAPER_MODE = "wallpaper_mode"
 
 private fun getSavedWallpaperMode(context: Context): WallpaperMode {
-    val prefs = context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
-    val saved = prefs.getString(KEY_WALLPAPER_MODE, WallpaperMode.DEVICE.name)
     return try {
-        WallpaperMode.valueOf(saved ?: WallpaperMode.DEVICE.name)
-    } catch (e: Exception) {
+        val prefs = context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        val all = prefs.all
+        when (val v = all[KEY_WALLPAPER_MODE]) {
+            is String -> {
+                try {
+                    WallpaperMode.valueOf(v)
+                } catch (e: Throwable) {
+                    WallpaperMode.DEVICE
+                }
+            }
+            is Number -> {
+                val idx = v.toInt()
+                WallpaperMode.values().getOrElse(idx) { WallpaperMode.DEVICE }
+            }
+            else -> WallpaperMode.DEVICE
+        }
+    } catch (e: Throwable) {
         WallpaperMode.DEVICE
     }
 }
 
 private fun saveWallpaperMode(context: Context, mode: WallpaperMode) {
-    val prefs = context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
-    prefs.edit().putString(KEY_WALLPAPER_MODE, mode.name).apply()
+    try {
+        val prefs = context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_WALLPAPER_MODE, mode.name).apply()
+    } catch (e: Throwable) {
+        e.printStackTrace()
+    }
 }
 
 object WallpaperCache {
@@ -228,26 +245,12 @@ fun DashboardScreen(
     val rejectReason = kernelInfo.rejectReason
 
     val deviceName = remember {
-        var vendorModel = ""
-        try {
-            val process = Runtime.getRuntime().exec("getprop ro.product.vendor.model")
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-            vendorModel = reader.readLine() ?: ""
-            process.waitFor()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        if (vendorModel.isNotBlank()) {
-            vendorModel
+        val manufacturer = android.os.Build.MANUFACTURER
+        val model = android.os.Build.MODEL
+        if (model.lowercase().startsWith(manufacturer.lowercase())) {
+            model.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
         } else {
-            val manufacturer = android.os.Build.MANUFACTURER
-            val model = android.os.Build.MODEL
-            if (model.lowercase().startsWith(manufacturer.lowercase())) {
-                model.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
-            } else {
-                manufacturer.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() } + " " + model
-            }
+            manufacturer.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() } + " " + model
         }
     }
 
@@ -261,8 +264,9 @@ fun DashboardScreen(
             var localIsLoaded = false
             try {
                 // Since this app is a root app, fetch wallpaper directly from system to bypass permissions
+                val myUid = android.os.Process.myUid()
                 val cacheFile = java.io.File(context.cacheDir, "root_wallpaper")
-                val cmd = "cp /data/system/users/0/wallpaper ${cacheFile.absolutePath} && chmod 644 ${cacheFile.absolutePath}"
+                val cmd = "cp /data/system/users/0/wallpaper ${cacheFile.absolutePath} && chown $myUid:$myUid ${cacheFile.absolutePath} && chmod 644 ${cacheFile.absolutePath}"
                 SuiKernelIoctl.runCommand(cmd)
                 
                 if (cacheFile.exists() && cacheFile.length() > 0) {
@@ -815,18 +819,15 @@ fun checkRootAccess(): Boolean {
         if (SuiKernelIoctl.isNativeRootSupported()) {
             return true
         }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         // Ignore
     }
 
-    // 2. Fallback to traditional su
+    // 2. Fallback to shell id with strict timeout
     return try {
-        val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
-        val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-        val output = reader.readLine()
-        process.waitFor()
-        output?.contains("uid=0(root)") == true || process.exitValue() == 0
-    } catch (e: Exception) {
+        val lines = SuiKernelIoctl.runCommandWithOutput("id")
+        lines.any { it.contains("uid=0(root)") }
+    } catch (e: Throwable) {
         false
     }
 }

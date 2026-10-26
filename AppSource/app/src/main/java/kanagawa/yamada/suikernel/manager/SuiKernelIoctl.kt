@@ -35,7 +35,7 @@ object SuiKernelIoctl {
     init {
         try {
             System.loadLibrary("suikernel_ioctl")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             e.printStackTrace()
         }
     }
@@ -44,6 +44,7 @@ object SuiKernelIoctl {
     external fun hasNativeRoot(): Boolean
     external fun nativeReadProcVersion(): String?
     external fun nativeReadManagerVersion(): String?
+    external fun nativeKillStaleInstances()
     external fun nativeWriteFeature(name: String, value: String): Boolean
     external fun nativeWriteStorage(
         anya: String,
@@ -58,10 +59,18 @@ object SuiKernelIoctl {
     ): Boolean
     external fun nativeReadStorage(): String?
 
+    fun killStaleInstances() {
+        try {
+            nativeKillStaleInstances()
+        } catch (e: Throwable) {
+            // Ignore
+        }
+    }
+
     fun readProcVersion(): String? {
         return try {
             nativeReadProcVersion()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
     }
@@ -69,7 +78,7 @@ object SuiKernelIoctl {
     fun readManagerVersion(): String? {
         return try {
             nativeReadManagerVersion()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
     }
@@ -86,7 +95,7 @@ object SuiKernelIoctl {
             if (nativeRootAvailable == true) return true
             val supported = try {
                 hasNativeRoot()
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 false
             }
             if (supported) {
@@ -111,83 +120,99 @@ object SuiKernelIoctl {
     const val CMD_SUI_ELEVATE_ROOT = 0x53554901L
     const val SUI_ELEVATE_MAGIC = 0x59414D4144415355L
 
-    fun runCommand(cmd: String): Boolean {
-        // 1. Try su
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            process.waitFor()
-            if (process.exitValue() == 0) return true
-        } catch (e: Exception) {
-            // su not found
-        }
-
-        // 2. Try sh fallback (for elevated Yamada SU / Vanilla)
+    private fun executeProcess(shell: String, cmd: String, timeoutSec: Long = 4): Pair<Int, Pair<String, String>> {
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            process.waitFor()
-            process.exitValue() == 0
+            val process = Runtime.getRuntime().exec(arrayOf(shell, "-c", cmd))
+            try {
+                process.outputStream.close()
+            } catch (e: Exception) {
+                // Ignore
+            }
+
+            var outStr = ""
+            var errStr = ""
+            val outThread = Thread {
+                try {
+                    outStr = process.inputStream.bufferedReader().readText()
+                } catch (e: Exception) {
+                    outStr = ""
+                }
+            }
+            val errThread = Thread {
+                try {
+                    errStr = process.errorStream.bufferedReader().readText()
+                } catch (e: Exception) {
+                    errStr = ""
+                }
+            }
+            outThread.start()
+            errThread.start()
+
+            val finished = process.waitFor(timeoutSec, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                try { outThread.interrupt() } catch (e: Exception) {}
+                try { errThread.interrupt() } catch (e: Exception) {}
+                return Pair(-1, Pair("", "Timeout"))
+            }
+
+            try { outThread.join(500) } catch (e: Exception) {}
+            try { errThread.join(500) } catch (e: Exception) {}
+            Pair(process.exitValue(), Pair(outStr, errStr))
         } catch (e: Exception) {
-            false
+            Pair(-1, Pair("", e.message ?: "Execution error"))
         }
+    }
+
+    fun runCommand(cmd: String): Boolean {
+        val preferSh = isNativeRootSupported()
+        val firstShell = if (preferSh) "sh" else "su"
+        val secondShell = if (preferSh) "su" else "sh"
+
+        val res1 = executeProcess(firstShell, cmd, 4)
+        if (res1.first == 0) return true
+
+        val res2 = executeProcess(secondShell, cmd, 4)
+        return res2.first == 0
     }
 
     fun runCommandWithOutput(cmd: String): List<String> {
-        val lines = mutableListOf<String>()
+        val preferSh = isNativeRootSupported()
+        val firstShell = if (preferSh) "sh" else "su"
+        val secondShell = if (preferSh) "su" else "sh"
 
-        // 1. Try su
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            process.inputStream.bufferedReader().useLines { it.forEach { line -> lines.add(line) } }
-            process.waitFor()
-            if (process.exitValue() == 0 && lines.isNotEmpty()) {
-                return lines
-            }
-        } catch (e: Exception) {
-            // su not found
+        val res1 = executeProcess(firstShell, cmd, 4)
+        if (res1.first == 0 && res1.second.first.isNotEmpty()) {
+            return res1.second.first.lines()
         }
 
-        // 2. Try sh fallback (for elevated Yamada SU / Vanilla)
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            val shLines = mutableListOf<String>()
-            process.inputStream.bufferedReader().useLines { it.forEach { line -> shLines.add(line) } }
-            process.waitFor()
-            if (shLines.isNotEmpty()) {
-                return shLines
-            }
-        } catch (e: Exception) {
-            // sh error
+        val res2 = executeProcess(secondShell, cmd, 4)
+        if (res2.second.first.isNotEmpty()) {
+            return res2.second.first.lines()
         }
-
-        return lines
+        return emptyList()
     }
 
     fun runTerminalCommand(cmd: String): String {
-        // 1. Try su
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val out = process.inputStream.bufferedReader().readText()
-            val err = process.errorStream.bufferedReader().readText()
-            process.waitFor()
-            if (process.exitValue() == 0 || out.isNotEmpty()) {
-                val combined = (out + if (err.isNotEmpty()) "\n$err" else "").trim()
-                return combined.ifEmpty { "(Command completed with no output)" }
-            }
-        } catch (e: Exception) {
-            // su not available
+        val preferSh = isNativeRootSupported()
+        val firstShell = if (preferSh) "sh" else "su"
+        val secondShell = if (preferSh) "su" else "sh"
+
+        val res1 = executeProcess(firstShell, cmd, 10)
+        val out1 = res1.second.first
+        val err1 = res1.second.second
+        if (res1.first == 0 || out1.isNotEmpty()) {
+            val combined = (out1 + if (err1.isNotEmpty()) "\n$err1" else "").trim()
+            return combined.ifEmpty { "(Command completed with no output)" }
         }
 
-        // 2. Try sh fallback (for elevated Yamada SU / Vanilla)
-        return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            val out = process.inputStream.bufferedReader().readText()
-            val err = process.errorStream.bufferedReader().readText()
-            process.waitFor()
-            val combined = (out + if (err.isNotEmpty()) "\n$err" else "").trim()
-            if (combined.isNotEmpty()) combined else if (process.exitValue() == 0) "(Command completed with no output)" else "Exit code: ${process.exitValue()}"
-        } catch (e: Exception) {
-            "Error: ${e.message}"
-        }
+        val res2 = executeProcess(secondShell, cmd, 10)
+        val out2 = res2.second.first
+        val err2 = res2.second.second
+        val combined = (out2 + if (err2.isNotEmpty()) "\n$err2" else "").trim()
+        if (combined.isNotEmpty()) return combined
+        if (res2.first == 0) return "(Command completed with no output)"
+        return "Exit code: ${res2.first}"
     }
 
     private fun updateCache(name: String, value: String) {
@@ -335,10 +360,9 @@ object SuiKernelIoctl {
     }
 
     fun readStorage(): SuiKernelConfig {
+        if (isLoaded) return cachedConfig
         return try {
-            ioExecutor.submit(java.util.concurrent.Callable {
-                doReadStorage()
-            }).get(3, java.util.concurrent.TimeUnit.SECONDS)
+            doReadStorage()
         } catch (e: Exception) {
             cachedConfig
         }

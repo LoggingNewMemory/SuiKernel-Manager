@@ -239,9 +239,7 @@ fun fetchUpdateJson(updateJsonUrl: String): Triple<String, Int, String>? {
     if (jsonText.isBlank()) {
         try {
             val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 8 '$updateJsonUrl'"
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
-            process.waitFor()
+            val text = SuiKernelIoctl.runCommandWithOutput(cmd).joinToString("\n").trim()
             if (text.startsWith("{") && text.endsWith("}")) {
                 jsonText = text
             }
@@ -330,9 +328,7 @@ fun fetchLatestTagViaHead(repo: String, platform: HostPlatform): String? {
     if (tag.isNullOrBlank()) {
         try {
             val cmd = "/system/bin/curl -s -I -k -A 'SuiKernelManager' --connect-timeout 4 '$checkUrl'"
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val lines = process.inputStream.bufferedReader().readLines()
-            process.waitFor()
+            val lines = SuiKernelIoctl.runCommandWithOutput(cmd)
 
             for (line in lines) {
                 if (line.trim().startsWith("location:", ignoreCase = true)) {
@@ -388,9 +384,7 @@ fun fetchVersionFromModuleProp(repo: String, platform: HostPlatform): String? {
         if (text.isNullOrBlank()) {
             try {
                 val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 4 '$url'"
-                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                val out = proc.inputStream.bufferedReader().use { it.readText() }.trim()
-                proc.waitFor()
+                val out = SuiKernelIoctl.runCommandWithOutput(cmd).joinToString("\n").trim()
                 if (out.contains("version=")) {
                     text = out
                 }
@@ -428,9 +422,7 @@ private fun fetchGitHubZipAssets(assetUrl: String): List<String> {
     if (html.isBlank()) {
         try {
             val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 4 '$assetUrl'"
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            html = process.inputStream.bufferedReader().use { it.readText() }
-            process.waitFor()
+            html = SuiKernelIoctl.runCommandWithOutput(cmd).joinToString("\n")
         } catch (e: Exception) {
             // Ignore
         }
@@ -659,9 +651,7 @@ private fun fetchGitHubReleaseViaApi(repo: String): Pair<String, String>? {
     if (jsonStr.isBlank()) {
         try {
             val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 8 'https://api.github.com/repos/$repo/releases/latest'"
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
-            process.waitFor()
+            val text = SuiKernelIoctl.runCommandWithOutput(cmd).joinToString("\n").trim()
             if (text.startsWith("{") && text.endsWith("}")) {
                 jsonStr = text
             }
@@ -745,9 +735,7 @@ private fun fetchGitLabReleaseViaApi(repo: String): Pair<String, String>? {
     if (jsonStr.isBlank()) {
         try {
             val cmd = "/system/bin/curl -s -L -k -A 'SuiKernelManager' --connect-timeout 6 'https://gitlab.com/api/v4/projects/$encodedPath/releases/permalink/latest'"
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
-            process.waitFor()
+            val text = SuiKernelIoctl.runCommandWithOutput(cmd).joinToString("\n").trim()
             if (text.startsWith("{") && text.endsWith("}")) {
                 jsonStr = text
             }
@@ -956,7 +944,8 @@ fun downloadModuleZip(
                 }
             }
 
-            Runtime.getRuntime().exec(arrayOf("su", "-c", "chmod 644 '$destPath'")).waitFor()
+            val myUid = android.os.Process.myUid()
+            SuiKernelIoctl.runCommand("chown $myUid:$myUid '$destPath' && chmod 644 '$destPath'")
 
             if (file.exists() && file.length() > 512) {
                 onProgress(100, file.length(), file.length())
@@ -967,19 +956,22 @@ fun downloadModuleZip(
         e.printStackTrace()
     }
 
-    // 2. Fallback: su curl download
+    // 2. Fallback: su/sh curl download
     return try {
         val sizeCmd = "/system/bin/curl -sIL -k -A 'SuiKernelManager' '$downloadUrl' | grep -i 'content-length' | tail -n 1 | tr -d '\\r\\n' | awk '{print \$2}'"
-        val sizeProc = Runtime.getRuntime().exec(arrayOf("su", "-c", sizeCmd))
-        val totalBytesStr = sizeProc.inputStream.bufferedReader().use { it.readText() }.trim()
+        val totalBytesStr = SuiKernelIoctl.runCommandWithOutput(sizeCmd).firstOrNull()?.trim() ?: ""
         val totalBytes = totalBytesStr.toLongOrNull() ?: 0L
-        sizeProc.waitFor()
 
         val downloadCmd = "/system/bin/curl -L -k -A 'SuiKernelManager' --connect-timeout 15 '$downloadUrl' -o '$destPath'"
-        val downloadProc = Runtime.getRuntime().exec(arrayOf("su", "-c", downloadCmd))
+        val preferSh = SuiKernelIoctl.isNativeRootSupported()
+        val shell = if (preferSh) "sh" else "su"
+        val downloadProc = Runtime.getRuntime().exec(arrayOf(shell, "-c", downloadCmd))
+        try { downloadProc.outputStream.close() } catch (e: Exception) {}
 
-        while (downloadProc.isAlive) {
+        var loops = 0
+        while (downloadProc.isAlive && loops < 300) {
             Thread.sleep(200)
+            loops++
             if (file.exists()) {
                 val currentSize = file.length()
                 if (totalBytes > 0) {
@@ -991,9 +983,14 @@ fun downloadModuleZip(
                 }
             }
         }
-        downloadProc.waitFor()
+        if (downloadProc.isAlive) {
+            downloadProc.destroyForcibly()
+        } else {
+            downloadProc.waitFor()
+        }
 
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "chmod 644 '$destPath'")).waitFor()
+        val myUid = android.os.Process.myUid()
+        SuiKernelIoctl.runCommand("chown $myUid:$myUid '$destPath' && chmod 644 '$destPath'")
 
         if (file.exists() && file.length() > 512) {
             onProgress(100, file.length(), file.length())
@@ -1024,7 +1021,7 @@ fun flashModuleZip(zipFile: File, onLine: (String) -> Unit) {
 
 fun rebootDevice() {
     try {
-        Runtime.getRuntime().exec(arrayOf("su", "-c", "/system/bin/svc power reboot || /system/bin/reboot"))
+        SuiKernelIoctl.runCommand("/system/bin/svc power reboot || /system/bin/reboot")
     } catch (e: Exception) {
         e.printStackTrace()
     }
@@ -1065,7 +1062,11 @@ fun markModulePendingReboot(context: Context, repo: String) {
     try {
         val prefs = context.getSharedPreferences(PREFS_REBOOT_PENDING, Context.MODE_PRIVATE)
         val currentBootId = getSystemBootId()
-        val currentSet = prefs.getStringSet(KEY_PENDING_REPOS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        val currentSet = try {
+            prefs.getStringSet(KEY_PENDING_REPOS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        } catch (e: Exception) {
+            mutableSetOf()
+        }
         currentSet.add(repo)
         prefs.edit()
             .putString(KEY_BOOT_ID, currentBootId)

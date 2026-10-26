@@ -25,6 +25,8 @@
 #include <string.h>
 #include <android/log.h>
 #include <errno.h>
+#include <dirent.h>
+#include <signal.h>
 
 #define LOG_TAG "SuiKernelIoctl"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -32,6 +34,35 @@
 
 #define CMD_SUI_ELEVATE_ROOT 0x53554901
 #define SUI_ELEVATE_MAGIC 0x59414D4144415355ULL
+
+// Terminates any stale/orphaned instances of the manager from previous installations/runs
+// Reads /proc/<pid>/comm (never cmdline) to avoid acquiring mm->mmap_sem and deadlocking on hung tasks
+static void kill_stale_manager_instances(void) {
+    pid_t my_pid = getpid();
+    DIR *proc = opendir("/proc");
+    if (!proc) return;
+    struct dirent *entry;
+    while ((entry = readdir(proc)) != NULL) {
+        if (entry->d_name[0] >= '0' && entry->d_name[0] <= '9') {
+            pid_t pid = atoi(entry->d_name);
+            if (pid > 0 && pid != my_pid) {
+                char comm_path[64];
+                snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
+                int fd = open(comm_path, O_RDONLY);
+                if (fd >= 0) {
+                    char comm[32] = {0};
+                    ssize_t n = read(fd, comm, sizeof(comm) - 1);
+                    close(fd);
+                    if (n > 0 && (strstr(comm, "yamada") || strstr(comm, "uikernel") || strstr(comm, "SuiKernel"))) {
+                        LOGI("Terminating stale root manager PID %d (comm=%s)", pid, comm);
+                        kill(pid, SIGKILL);
+                    }
+                }
+            }
+        }
+    }
+    closedir(proc);
+}
 
 // Tries to elevate the calling thread to true root via Yamada SU kernel ioctl
 static int elevate_thread_if_needed(void) {
@@ -41,6 +72,12 @@ static int elevate_thread_if_needed(void) {
     int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
     close(fd);
     return ret;
+}
+
+JNIEXPORT void JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeKillStaleInstances(JNIEnv *env, jobject thiz) {
+    elevate_thread_if_needed();
+    kill_stale_manager_instances();
 }
 
 JNIEXPORT jint JNICALL

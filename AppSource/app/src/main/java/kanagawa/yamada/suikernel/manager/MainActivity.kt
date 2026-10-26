@@ -40,11 +40,36 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        
-        // Warm up Yamada SU root session & config cache in background
+
+        try {
+            startService(android.content.Intent(this, TaskCleanupService::class.java))
+        } catch (e: Throwable) {
+            // Ignore
+        }
+
+        // Clean exit when pressing back from the dashboard
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                finishAffinity()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        })
+
+        // Warm up Yamada SU root session, kill old ghost processes & config cache in background
         Thread {
             SuiKernelIoctl.isNativeRootSupported()
+            SuiKernelIoctl.killStaleInstances()
             SuiKernelIoctl.readStorage()
+
+            try {
+                val rootWallpaper = java.io.File(cacheDir, "root_wallpaper")
+                if (rootWallpaper.exists() && !rootWallpaper.canWrite()) {
+                    val myUid = android.os.Process.myUid()
+                    SuiKernelIoctl.runCommand("chown $myUid:$myUid ${rootWallpaper.absolutePath} || rm -f ${rootWallpaper.absolutePath}")
+                }
+            } catch (e: Throwable) {
+                // Ignore
+            }
         }.start()
 
         setContent {
@@ -96,5 +121,24 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
+}
+
+class TaskCleanupService : android.app.Service() {
+    override fun onBind(intent: android.content.Intent?) = null
+
+    override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
+        return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+        super.onTaskRemoved(rootIntent)
+        android.os.Process.killProcess(android.os.Process.myPid())
+        stopSelf()
     }
 }
