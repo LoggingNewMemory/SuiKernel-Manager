@@ -122,11 +122,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        android.os.Process.killProcess(android.os.Process.myPid())
-    }
 }
 
 class TaskCleanupService : android.app.Service() {

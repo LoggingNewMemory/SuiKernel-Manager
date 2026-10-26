@@ -64,14 +64,36 @@ static void kill_stale_manager_instances(void) {
     closedir(proc);
 }
 
+// Probe whether the kernel supports Yamada SU without altering thread credentials
+static int probe_kernel_has_sui(void) {
+    int fd = open("/dev/null", O_RDWR);
+    if (fd < 0) return 0;
+    errno = 0;
+    int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, 0ULL);
+    int err = errno;
+    close(fd);
+    return (ret == -EINVAL || err == EINVAL) ? 1 : 0;
+}
+
 // Tries to elevate the calling thread to true root via Yamada SU kernel ioctl
 static int elevate_thread_if_needed(void) {
     if (getuid() == 0) return 0;
+    // Protect the UI thread from having its UID changed.
+    // Changing the UI thread's UID breaks Android's InputMethodManager (keyboard),
+    // WindowManager, and ViewRootImpl due to UID mismatch with system_server.
+    if (gettid() == getpid()) return -1;
+
     int fd = open("/dev/null", O_RDWR);
     if (fd < 0) return -1;
     int ret = ioctl(fd, CMD_SUI_ELEVATE_ROOT, SUI_ELEVATE_MAGIC);
     close(fd);
     return ret;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeElevateThread(JNIEnv *env, jobject thiz) {
+    int ret = elevate_thread_if_needed();
+    return (ret == 0) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -107,6 +129,8 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeSendIoctl(JNIEnv *en
 // Tests whether the kernel supports native root elevation without using fork
 JNIEXPORT jboolean JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_hasNativeRoot(JNIEnv *env, jobject thiz) {
+    if (getuid() == 0) return JNI_TRUE;
+    if (probe_kernel_has_sui()) return JNI_TRUE;
     int ret = elevate_thread_if_needed();
     return (ret == 0) ? JNI_TRUE : JNI_FALSE;
 }

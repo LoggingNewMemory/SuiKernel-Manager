@@ -35,9 +35,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kanagawa.yamada.suikernel.manager.ui.theme.CardDark
@@ -65,30 +69,45 @@ fun SuiTerminalScreen(onNavigateBack: () -> Unit = {}) {
     val listState = rememberLazyListState()
 
     fun execute(cmd: String) {
-        val trimmed = cmd.trim()
-        if (trimmed.isEmpty()) return
-        if (trimmed.equals("clear", ignoreCase = true)) {
-            terminalLogs = emptyList()
-            commandInput = ""
-            return
-        }
-
-        commandInput = ""
-        terminalLogs = terminalLogs + "# $trimmed"
-        isRunning = true
-
-        coroutineScope.launch(Dispatchers.IO) {
-            val result = SuiKernelIoctl.runTerminalCommand(trimmed)
-            withContext(Dispatchers.Main) {
-                terminalLogs = terminalLogs + result
-                isRunning = false
+        try {
+            val trimmed = cmd.trim()
+            if (trimmed.isEmpty()) return
+            if (trimmed.equals("clear", ignoreCase = true)) {
+                terminalLogs = emptyList()
+                commandInput = ""
+                return
             }
+
+            commandInput = ""
+            terminalLogs = terminalLogs + "# $trimmed"
+            isRunning = true
+
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val result = SuiKernelIoctl.runTerminalCommand(trimmed)
+                    withContext(Dispatchers.Main) {
+                        terminalLogs = terminalLogs + result
+                        isRunning = false
+                    }
+                } catch (e: Throwable) {
+                    withContext(Dispatchers.Main) {
+                        terminalLogs = terminalLogs + "Error: ${e.message ?: "Execution failed"}"
+                        isRunning = false
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            isRunning = false
         }
     }
 
     LaunchedEffect(terminalLogs.size) {
         if (terminalLogs.isNotEmpty()) {
-            listState.animateScrollToItem(terminalLogs.size - 1)
+            try {
+                listState.animateScrollToItem(terminalLogs.size - 1)
+            } catch (e: Throwable) {
+                // Ignore animation cancellation
+            }
         }
     }
 
@@ -98,7 +117,8 @@ fun SuiTerminalScreen(onNavigateBack: () -> Unit = {}) {
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 32.dp)
+            .imePadding()
+            .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
 
         // Quick Command Chips
@@ -151,7 +171,7 @@ fun SuiTerminalScreen(onNavigateBack: () -> Unit = {}) {
                     val isCmd = log.startsWith("# ")
                     Text(
                         text = log,
-                        fontFamily = GoogleSansFlex,
+                        fontFamily = FontFamily.Monospace,
                         fontWeight = if (isCmd) FontWeight.Medium else FontWeight.Normal,
                         fontSize = 13.sp,
                         color = if (isCmd) Color(0xFF58A6FF) else Color(0xFFE6EDF3),
@@ -172,7 +192,7 @@ fun SuiTerminalScreen(onNavigateBack: () -> Unit = {}) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Running...",
-                                fontFamily = GoogleSansFlex,
+                                fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 12.sp,
                                 color = Color.Gray
@@ -192,21 +212,35 @@ fun SuiTerminalScreen(onNavigateBack: () -> Unit = {}) {
         ) {
             OutlinedTextField(
                 value = commandInput,
-                onValueChange = { commandInput = it },
+                onValueChange = { newText ->
+                    commandInput = newText.filter { it != '\n' && it != '\r' }
+                },
                 placeholder = {
                     Text(
                         text = "Enter command...",
-                        fontFamily = GoogleSansFlex,
+                        fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Normal,
                         fontSize = 13.sp,
                         color = Color.Gray
                     )
                 },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { execute(commandInput) }),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    keyboardType = KeyboardType.Ascii,
+                    imeAction = ImeAction.Send
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        val cmd = commandInput.trim()
+                        if (cmd.isNotEmpty() && !isRunning) {
+                            execute(cmd)
+                        }
+                    }
+                ),
                 textStyle = LocalTextStyle.current.copy(
-                    fontFamily = GoogleSansFlex,
+                    fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Normal,
                     fontSize = 13.sp,
                     color = Color.White
@@ -218,7 +252,21 @@ fun SuiTerminalScreen(onNavigateBack: () -> Unit = {}) {
                     unfocusedContainerColor = CardDark
                 ),
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .onKeyEvent { keyEvent ->
+                        if (keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_ENTER) {
+                            if (keyEvent.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN) {
+                                val cmd = commandInput.trim()
+                                if (cmd.isNotEmpty() && !isRunning) {
+                                    execute(cmd)
+                                }
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
             )
 
             Spacer(modifier = Modifier.width(8.dp))

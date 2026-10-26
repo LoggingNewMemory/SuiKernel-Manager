@@ -963,9 +963,8 @@ fun downloadModuleZip(
         val totalBytes = totalBytesStr.toLongOrNull() ?: 0L
 
         val downloadCmd = "/system/bin/curl -L -k -A 'SuiKernelManager' --connect-timeout 15 '$downloadUrl' -o '$destPath'"
-        val preferSh = SuiKernelIoctl.isNativeRootSupported()
-        val shell = if (preferSh) "sh" else "su"
-        val downloadProc = Runtime.getRuntime().exec(arrayOf(shell, "-c", downloadCmd))
+        try { SuiKernelIoctl.nativeElevateThread() } catch (e: Throwable) {}
+        val downloadProc = Runtime.getRuntime().exec(arrayOf("sh", "-c", downloadCmd))
         try { downloadProc.outputStream.close() } catch (e: Exception) {}
 
         var loops = 0

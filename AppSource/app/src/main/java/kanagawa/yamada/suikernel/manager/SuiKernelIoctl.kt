@@ -42,6 +42,7 @@ object SuiKernelIoctl {
 
     external fun nativeSendIoctl(cmd: Long, arg: Long): Int
     external fun hasNativeRoot(): Boolean
+    external fun nativeElevateThread(): Boolean
     external fun nativeReadProcVersion(): String?
     external fun nativeReadManagerVersion(): String?
     external fun nativeKillStaleInstances()
@@ -101,19 +102,11 @@ object SuiKernelIoctl {
     private var nativeRootAvailable: Boolean? = null
 
     fun isNativeRootSupported(): Boolean {
-        if (nativeRootAvailable != null) return nativeRootAvailable == true
+        nativeRootAvailable?.let { return it }
         return synchronized(this) {
-            if (nativeRootAvailable != null) return nativeRootAvailable == true
-            // Test root escalation on background thread so UI thread credentials remain intact
-            val future = ioExecutor.submit<Boolean> {
-                try {
-                    hasNativeRoot()
-                } catch (e: Throwable) {
-                    false
-                }
-            }
+            nativeRootAvailable?.let { return it }
             val supported = try {
-                future.get(2, java.util.concurrent.TimeUnit.SECONDS)
+                hasNativeRoot()
             } catch (e: Throwable) {
                 false
             }
@@ -139,6 +132,11 @@ object SuiKernelIoctl {
 
     private fun executeProcess(shell: String, cmd: String, timeoutSec: Long = 4): Pair<Int, Pair<String, String>> {
         return try {
+            try {
+                nativeElevateThread()
+            } catch (e: Throwable) {
+                // Ignore if JNI not loaded
+            }
             val process = Runtime.getRuntime().exec(arrayOf(shell, "-c", cmd))
             try {
                 process.outputStream.close()
@@ -182,54 +180,31 @@ object SuiKernelIoctl {
     }
 
     fun runCommand(cmd: String): Boolean {
-        val preferSh = isNativeRootSupported()
-        val firstShell = if (preferSh) "sh" else "su"
-        val secondShell = if (preferSh) "su" else "sh"
-
-        val res1 = executeProcess(firstShell, cmd, 4)
-        if (res1.first == 0) return true
-
-        val res2 = executeProcess(secondShell, cmd, 4)
-        return res2.first == 0
+        val res = executeProcess("sh", cmd, 4)
+        return res.first == 0
     }
 
     fun runCommandWithOutput(cmd: String): List<String> {
-        val preferSh = isNativeRootSupported()
-        val firstShell = if (preferSh) "sh" else "su"
-        val secondShell = if (preferSh) "su" else "sh"
-
-        val res1 = executeProcess(firstShell, cmd, 4)
-        if (res1.first == 0 && res1.second.first.isNotEmpty()) {
-            return res1.second.first.lines()
-        }
-
-        val res2 = executeProcess(secondShell, cmd, 4)
-        if (res2.second.first.isNotEmpty()) {
-            return res2.second.first.lines()
+        val res = executeProcess("sh", cmd, 4)
+        if (res.second.first.isNotEmpty()) {
+            return res.second.first.lines()
         }
         return emptyList()
     }
 
     fun runTerminalCommand(cmd: String): String {
-        val preferSh = isNativeRootSupported()
-        val firstShell = if (preferSh) "sh" else "su"
-        val secondShell = if (preferSh) "su" else "sh"
-
-        val res1 = executeProcess(firstShell, cmd, 10)
-        val out1 = res1.second.first
-        val err1 = res1.second.second
-        if (res1.first == 0 || out1.isNotEmpty()) {
-            val combined = (out1 + if (err1.isNotEmpty()) "\n$err1" else "").trim()
+        val res = executeProcess("sh", cmd, 10)
+        val out = res.second.first
+        val err = res.second.second
+        if (res.first == 0 || out.isNotEmpty()) {
+            val combined = (out + if (err.isNotEmpty()) "\n$err" else "").trim()
             return combined.ifEmpty { "(Command completed with no output)" }
         }
-
-        val res2 = executeProcess(secondShell, cmd, 10)
-        val out2 = res2.second.first
-        val err2 = res2.second.second
-        val combined = (out2 + if (err2.isNotEmpty()) "\n$err2" else "").trim()
-        if (combined.isNotEmpty()) return combined
-        if (res2.first == 0) return "(Command completed with no output)"
-        return "Exit code: ${res2.first}"
+        if (err.isNotEmpty()) {
+            return err.trim()
+        }
+        if (res.first == 0) return "(Command completed with no output)"
+        return "Exit code: ${res.first}"
     }
 
     private fun updateCache(name: String, value: String) {
