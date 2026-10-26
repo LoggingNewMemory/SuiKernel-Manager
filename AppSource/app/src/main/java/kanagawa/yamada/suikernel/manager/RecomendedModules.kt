@@ -305,10 +305,14 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 isCheckingUpdates = false
                 if (isManual) {
                     val updatesCount = updated.count { it.status == ModuleStatus.UPDATE }
-                    if (updatesCount > 0) {
-                        Toast.makeText(context, "$updatesCount update${if (updatesCount > 1) "s" else ""} available", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "All modules are up to date", Toast.LENGTH_SHORT).show()
+                    try {
+                        if (updatesCount > 0) {
+                            Toast.makeText(context.applicationContext, "$updatesCount update${if (updatesCount > 1) "s" else ""} available", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context.applicationContext, "All modules are up to date", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Throwable) {
+                        // Ignore Toast errors
                     }
                 }
             }
@@ -487,14 +491,18 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                     module = module,
                     onActionClick = {
                         if (module.status == ModuleStatus.REBOOT) {
-                            Toast.makeText(context, "Rebooting device...", Toast.LENGTH_SHORT).show()
+                            try {
+                                Toast.makeText(context.applicationContext, "Rebooting device...", Toast.LENGTH_SHORT).show()
+                            } catch (e: Throwable) {}
                             coroutineScope.launch(Dispatchers.IO) {
                                 rebootDevice()
                             }
                             return@ModuleRowItem
                         }
                         if (module.status == ModuleStatus.INSTALLED) {
-                            Toast.makeText(context, "${module.title} is already installed", Toast.LENGTH_SHORT).show()
+                            try {
+                                Toast.makeText(context.applicationContext, "${module.title} is already installed", Toast.LENGTH_SHORT).show()
+                            } catch (e: Throwable) {}
                             return@ModuleRowItem
                         }
 
@@ -519,7 +527,9 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                             }
 
                             if (targetUrl.isBlank()) {
-                                Toast.makeText(context, "Could not fetch release URL. Check connection.", Toast.LENGTH_SHORT).show()
+                                try {
+                                    Toast.makeText(context.applicationContext, "Could not fetch release URL. Check connection.", Toast.LENGTH_SHORT).show()
+                                } catch (e: Throwable) {}
                                 modulesState = modulesState.map {
                                     if (it.repo == module.repo) it.copy(isBusy = false, progressText = "") else it
                                 }

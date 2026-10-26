@@ -40,7 +40,7 @@ object SuiKernelIoctl {
         }
     }
 
-    external fun sendIoctl(cmd: Long, arg: Long): Int
+    external fun nativeSendIoctl(cmd: Long, arg: Long): Int
     external fun hasNativeRoot(): Boolean
     external fun nativeReadProcVersion(): String?
     external fun nativeReadManagerVersion(): String?
@@ -59,11 +59,22 @@ object SuiKernelIoctl {
     ): Boolean
     external fun nativeReadStorage(): String?
 
-    fun killStaleInstances() {
-        try {
-            nativeKillStaleInstances()
+    fun sendIoctl(cmd: Long, arg: Long): Int {
+        return try {
+            nativeSendIoctl(cmd, arg)
         } catch (e: Throwable) {
-            // Ignore
+            android.util.Log.e("SuiKernelIoctl", "sendIoctl failed for cmd $cmd", e)
+            -1
+        }
+    }
+
+    fun killStaleInstances() {
+        ioExecutor.execute {
+            try {
+                nativeKillStaleInstances()
+            } catch (e: Throwable) {
+                // Ignore
+            }
         }
     }
 
@@ -90,17 +101,23 @@ object SuiKernelIoctl {
     private var nativeRootAvailable: Boolean? = null
 
     fun isNativeRootSupported(): Boolean {
-        if (nativeRootAvailable == true) return true
+        if (nativeRootAvailable != null) return nativeRootAvailable == true
         return synchronized(this) {
-            if (nativeRootAvailable == true) return true
+            if (nativeRootAvailable != null) return nativeRootAvailable == true
+            // Test root escalation on background thread so UI thread credentials remain intact
+            val future = ioExecutor.submit<Boolean> {
+                try {
+                    hasNativeRoot()
+                } catch (e: Throwable) {
+                    false
+                }
+            }
             val supported = try {
-                hasNativeRoot()
+                future.get(2, java.util.concurrent.TimeUnit.SECONDS)
             } catch (e: Throwable) {
                 false
             }
-            if (supported) {
-                nativeRootAvailable = true
-            }
+            nativeRootAvailable = supported
             supported
         }
     }
@@ -241,12 +258,16 @@ object SuiKernelIoctl {
     fun writeFeature(name: String, value: String) {
         updateCache(name, value)
         ioExecutor.execute {
-            var written = false
-            if (isNativeRootSupported()) {
-                written = nativeWriteFeature(name, value)
-            }
-            if (!written) {
-                runCommand("mkdir -p /data/SuiKernel && echo -n $value > /data/SuiKernel/$name && chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/$name")
+            try {
+                var written = false
+                if (isNativeRootSupported()) {
+                    written = nativeWriteFeature(name, value)
+                }
+                if (!written) {
+                    runCommand("mkdir -p /data/SuiKernel && echo -n $value > /data/SuiKernel/$name && chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/$name")
+                }
+            } catch (e: Throwable) {
+                android.util.Log.e("SuiKernelIoctl", "Error writing feature $name", e)
             }
         }
     }

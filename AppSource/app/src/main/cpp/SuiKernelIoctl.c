@@ -99,6 +99,11 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_sendIoctl(JNIEnv *env, job
     return ret;
 }
 
+JNIEXPORT jint JNICALL
+Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeSendIoctl(JNIEnv *env, jobject thiz, jlong cmd, jlong arg) {
+    return Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_sendIoctl(env, thiz, cmd, arg);
+}
+
 // Tests whether the kernel supports native root elevation without using fork
 JNIEXPORT jboolean JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_hasNativeRoot(JNIEnv *env, jobject thiz) {
@@ -106,11 +111,14 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_hasNativeRoot(JNIEnv *env,
     return (ret == 0) ? JNI_TRUE : JNI_FALSE;
 }
 
-// Direct reading of /proc/version with thread elevation
+// Direct reading of /proc/version
 JNIEXPORT jstring JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadProcVersion(JNIEnv *env, jobject thiz) {
-    elevate_thread_if_needed();
     int fd = open("/proc/version", O_RDONLY);
+    if (fd < 0) {
+        elevate_thread_if_needed();
+        fd = open("/proc/version", O_RDONLY);
+    }
     if (fd >= 0) {
         char buf[512] = {0};
         ssize_t n = read(fd, buf, sizeof(buf) - 1);
@@ -123,11 +131,14 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadProcVersion(JNIE
     return NULL;
 }
 
-// Direct reading of /proc/suikernel_manager_version with thread elevation
+// Direct reading of /proc/suikernel_manager_version
 JNIEXPORT jstring JNICALL
 Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeReadManagerVersion(JNIEnv *env, jobject thiz) {
-    elevate_thread_if_needed();
     int fd = open("/proc/suikernel_manager_version", O_RDONLY);
+    if (fd < 0) {
+        elevate_thread_if_needed();
+        fd = open("/proc/suikernel_manager_version", O_RDONLY);
+    }
     if (fd >= 0) {
         char buf[64] = {0};
         ssize_t n = read(fd, buf, sizeof(buf) - 1);
@@ -147,7 +158,11 @@ Java_kanagawa_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteFeature(
     if (!name_jstr || !val_jstr) return JNI_FALSE;
     const char *name = (*env)->GetStringUTFChars(env, name_jstr, NULL);
     const char *val = (*env)->GetStringUTFChars(env, val_jstr, NULL);
-    if (!name || !val) return JNI_FALSE;
+    if (!name || !val) {
+        if (name) (*env)->ReleaseStringUTFChars(env, name_jstr, name);
+        if (val) (*env)->ReleaseStringUTFChars(env, val_jstr, val);
+        return JNI_FALSE;
+    }
 
     elevate_thread_if_needed();
     mkdir("/data/SuiKernel", 0755);
