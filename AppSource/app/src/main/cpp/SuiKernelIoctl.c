@@ -35,33 +35,8 @@
 #define CMD_SUI_ELEVATE_ROOT 0x53554901
 #define SUI_ELEVATE_MAGIC 0x59414D4144415355ULL
 
-// Terminates any stale/orphaned instances of the manager from previous installations/runs
-// Reads /proc/<pid>/comm (never cmdline) to avoid acquiring mm->mmap_sem and deadlocking on hung tasks
+// No-op: do not kill processes during startup to prevent restart loop collisions
 static void kill_stale_manager_instances(void) {
-    pid_t my_pid = getpid();
-    DIR *proc = opendir("/proc");
-    if (!proc) return;
-    struct dirent *entry;
-    while ((entry = readdir(proc)) != NULL) {
-        if (entry->d_name[0] >= '0' && entry->d_name[0] <= '9') {
-            pid_t pid = atoi(entry->d_name);
-            if (pid > 0 && pid != my_pid) {
-                char comm_path[64];
-                snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
-                int fd = open(comm_path, O_RDONLY);
-                if (fd >= 0) {
-                    char comm[32] = {0};
-                    ssize_t n = read(fd, comm, sizeof(comm) - 1);
-                    close(fd);
-                    if (n > 0 && (strstr(comm, "yamada") || strstr(comm, "uikernel") || strstr(comm, "SuiKernel"))) {
-                        LOGI("Terminating stale root manager PID %d (comm=%s)", pid, comm);
-                        kill(pid, SIGKILL);
-                    }
-                }
-            }
-        }
-    }
-    closedir(proc);
 }
 
 // Probe whether the kernel supports Yamada SU without altering thread credentials

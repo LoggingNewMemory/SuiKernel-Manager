@@ -41,24 +41,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        try {
-            startService(android.content.Intent(this, TaskCleanupService::class.java))
-        } catch (e: Throwable) {
-            // Ignore
-        }
-
         // Clean exit when pressing back from the dashboard
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 finishAffinity()
-                android.os.Process.killProcess(android.os.Process.myPid())
             }
         })
 
-        // Warm up Yamada SU root session, kill old ghost processes & config cache in background
+        // Warm up Yamada SU root session & config cache in background
         Thread {
             SuiKernelIoctl.isNativeRootSupported()
-            SuiKernelIoctl.killStaleInstances()
             SuiKernelIoctl.readStorage()
 
             try {
@@ -121,19 +113,5 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-}
-
-class TaskCleanupService : android.app.Service() {
-    override fun onBind(intent: android.content.Intent?) = null
-
-    override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
-        return START_NOT_STICKY
-    }
-
-    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
-        super.onTaskRemoved(rootIntent)
-        android.os.Process.killProcess(android.os.Process.myPid())
-        stopSelf()
     }
 }
