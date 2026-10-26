@@ -100,47 +100,6 @@ fun SuiTerminalScreen(onNavigateBack: () -> Unit = {}) {
             .navigationBarsPadding()
             .padding(horizontal = 24.dp, vertical = 32.dp)
     ) {
-        // Header matching SuiKernel Settings style
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 16.dp)
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.ic_comet),
-                contentDescription = "Comet Icon",
-                tint = Color.White,
-                modifier = Modifier.size(48.dp)
-            )
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            VerticalDivider(
-                color = Color.White,
-                modifier = Modifier
-                    .height(48.dp)
-                    .width(1.dp)
-            )
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column {
-                Text(
-                    text = "Terminal Emulator",
-                    fontFamily = GoogleSansFlex,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 20.sp,
-                    color = Color.White
-                )
-
-                Text(
-                    text = "This added because The Dev needs to check",
-                    fontFamily = GoogleSansFlex,
-                    fontWeight = FontWeight.Light,
-                    fontSize = 12.sp,
-                    color = Color(0xFFA1D477)
-                )
-            }
-        }
 
         // Quick Command Chips
         Row(
