@@ -68,6 +68,25 @@ import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.util.zip.ZipFile
 
+fun interface BootEditorCallback {
+    fun onLog(line: String)
+}
+
+object SuiKernelBootEditor {
+    init {
+        try {
+            System.loadLibrary("suikernel_ioctl")
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
+    }
+
+    external fun nativeGetActiveSlot(): String
+    external fun nativeFindBootPartition(): String?
+    external fun nativePullBoot(targetPath: String, callback: BootEditorCallback): Int
+    external fun nativeFlashBoot(sourcePath: String, callback: BootEditorCallback): Int
+}
+
 @Composable
 fun BootImageEditorScreen(onNavigateBack: () -> Unit = {}) {
     val context = LocalContext.current
@@ -158,75 +177,25 @@ fun BootImageEditorScreen(onNavigateBack: () -> Unit = {}) {
 
     fun startPullBoot() {
         consoleTitle = "Pull Boot Partition"
-        consoleOutput = "=== SuiKernel Boot Puller ===\n"
+        consoleOutput = ""
         isOperating = true
         canReboot = false
 
         coroutineScope.launch(Dispatchers.IO) {
-            val script = """
-                SLOT=$(${'$'}(which getprop || echo "/system/bin/getprop") ro.boot.slot_suffix 2>/dev/null)
-                echo "[*] Active slot suffix: ${'$'}{SLOT:-none}"
+            val outDir = File("/sdcard/Download")
+            if (!outDir.exists()) {
+                outDir.mkdirs()
+            }
+            val outFile = File(outDir, "SuiKernel_boot.img")
 
-                BOOT_NODE=""
-                for p in \
-                    "/dev/block/by-name/boot${'$'}SLOT" \
-                    "/dev/block/bootdevice/by-name/boot${'$'}SLOT" \
-                    "/dev/block/mapper/boot${'$'}SLOT" \
-                    "/dev/block/platform/*/by-name/boot${'$'}SLOT" \
-                    "/dev/block/by-name/boot" \
-                    "/dev/block/bootdevice/by-name/boot"; do
-                    if [ -e "${'$'}p" ]; then
-                        BOOT_NODE="${'$'}p"
-                        break
-                    fi
-                done
-
-                if [ -z "${'$'}BOOT_NODE" ]; then
-                    if [ -n "${'$'}SLOT" ]; then
-                        BOOT_NODE=$(find /dev/block/ -name "boot${'$'}SLOT" 2>/dev/null | head -n 1)
-                    fi
-                    if [ -z "${'$'}BOOT_NODE" ]; then
-                        BOOT_NODE=$(find /dev/block/ -name "boot" 2>/dev/null | head -n 1)
-                    fi
-                fi
-
-                if [ -z "${'$'}BOOT_NODE" ]; then
-                    echo "[!] Error: Boot partition node could not be found!"
-                    exit 1
-                fi
-
-                REAL_NODE=$(readlink -f "${'$'}BOOT_NODE" 2>/dev/null || echo "${'$'}BOOT_NODE")
-                echo "[*] Target boot block: ${'$'}BOOT_NODE -> ${'$'}REAL_NODE"
-
-                OUT_DIR="/sdcard/Download"
-                if [ ! -d "${'$'}OUT_DIR" ]; then
-                    OUT_DIR="/storage/emulated/0/Download"
-                fi
-                mkdir -p "${'$'}OUT_DIR"
-                OUT_FILE="${'$'}OUT_DIR/SuiKernel_boot.img"
-
-                echo "[*] Pulling partition to ${'$'}OUT_FILE..."
-                if dd if="${'$'}REAL_NODE" of="${'$'}OUT_FILE" bs=4M 2>&1; then
-                    chmod 664 "${'$'}OUT_FILE" 2>/dev/null || true
-                    chown 1000:1000 "${'$'}OUT_FILE" 2>/dev/null || true
-                    echo "[+] Successfully pulled boot partition!"
-                    echo "[+] Saved location: ${'$'}OUT_FILE"
-                    ls -lh "${'$'}OUT_FILE" 2>/dev/null || true
-                else
-                    echo "[!] Error: dd execution failed!"
-                    exit 1
-                fi
-            """.trimIndent()
-
-            val exitCode = runProcessWithStreaming(script) { line ->
+            val exitCode = SuiKernelBootEditor.nativePullBoot(outFile.absolutePath) { line ->
                 coroutineScope.launch(Dispatchers.Main) {
                     consoleOutput = (consoleOutput ?: "") + line + "\n"
                 }
             }
 
             try {
-                val downloadedPath = "/sdcard/Download/SuiKernel_boot.img"
-                MediaScannerConnection.scanFile(context, arrayOf(downloadedPath), null, null)
+                MediaScannerConnection.scanFile(context, arrayOf(outFile.absolutePath), null, null)
             } catch (ignored: Exception) {}
 
             withContext(Dispatchers.Main) {
@@ -234,7 +203,7 @@ fun BootImageEditorScreen(onNavigateBack: () -> Unit = {}) {
                 if (exitCode == 0) {
                     consoleOutput = (consoleOutput ?: "") + "\n--- Pull complete! Stored in Download/SuiKernel_boot.img ---"
                 } else {
-                    consoleOutput = (consoleOutput ?: "") + "\n--- Pull failed with exit code $exitCode ---"
+                    consoleOutput = (consoleOutput ?: "") + "\n--- Pull failed with code $exitCode ---"
                 }
             }
         }
@@ -242,7 +211,7 @@ fun BootImageEditorScreen(onNavigateBack: () -> Unit = {}) {
 
     fun startFlashBoot(uri: Uri) {
         consoleTitle = "Flash Boot Partition"
-        consoleOutput = "=== SuiKernel Boot Flasher ===\n"
+        consoleOutput = ""
         isOperating = true
         canReboot = false
 
@@ -250,7 +219,7 @@ fun BootImageEditorScreen(onNavigateBack: () -> Unit = {}) {
             val tempImg = File(context.cacheDir, "flash_boot_${System.currentTimeMillis()}.img")
             try {
                 withContext(Dispatchers.Main) {
-                    consoleOutput = (consoleOutput ?: "") + "[*] Reading selected image file...\n"
+                    consoleOutput = "[*] Reading selected image file...\n"
                 }
 
                 context.contentResolver.openInputStream(uri)?.use { input ->
@@ -267,58 +236,7 @@ fun BootImageEditorScreen(onNavigateBack: () -> Unit = {}) {
                     return@launch
                 }
 
-                val fileSize = tempImg.length()
-                withContext(Dispatchers.Main) {
-                    consoleOutput = (consoleOutput ?: "") + "[*] Image ready (${fileSize / 1024 / 1024} MB)\n"
-                }
-
-                val script = """
-                    SLOT=$(${'$'}(which getprop || echo "/system/bin/getprop") ro.boot.slot_suffix 2>/dev/null)
-                    echo "[*] Active slot suffix: ${'$'}{SLOT:-none}"
-
-                    BOOT_NODE=""
-                    for p in \
-                        "/dev/block/by-name/boot${'$'}SLOT" \
-                        "/dev/block/bootdevice/by-name/boot${'$'}SLOT" \
-                        "/dev/block/mapper/boot${'$'}SLOT" \
-                        "/dev/block/platform/*/by-name/boot${'$'}SLOT" \
-                        "/dev/block/by-name/boot" \
-                        "/dev/block/bootdevice/by-name/boot"; do
-                        if [ -e "${'$'}p" ]; then
-                            BOOT_NODE="${'$'}p"
-                            break
-                        fi
-                    done
-
-                    if [ -z "${'$'}BOOT_NODE" ]; then
-                        if [ -n "${'$'}SLOT" ]; then
-                            BOOT_NODE=$(find /dev/block/ -name "boot${'$'}SLOT" 2>/dev/null | head -n 1)
-                        fi
-                        if [ -z "${'$'}BOOT_NODE" ]; then
-                            BOOT_NODE=$(find /dev/block/ -name "boot" 2>/dev/null | head -n 1)
-                        fi
-                    fi
-
-                    if [ -z "${'$'}BOOT_NODE" ]; then
-                        echo "[!] Error: Boot partition node could not be found!"
-                        exit 1
-                    fi
-
-                    REAL_NODE=$(readlink -f "${'$'}BOOT_NODE" 2>/dev/null || echo "${'$'}BOOT_NODE")
-                    echo "[*] Target boot block: ${'$'}BOOT_NODE -> ${'$'}REAL_NODE"
-
-                    INPUT_IMG="${tempImg.absolutePath}"
-                    echo "[*] Flashing image to ${'$'}REAL_NODE..."
-                    if dd if="${'$'}INPUT_IMG" of="${'$'}REAL_NODE" bs=4M 2>&1; then
-                        sync
-                        echo "[+] Boot partition flashed successfully!"
-                    else
-                        echo "[!] Error: dd flashing failed!"
-                        exit 1
-                    fi
-                """.trimIndent()
-
-                val exitCode = runProcessWithStreaming(script) { line ->
+                val exitCode = SuiKernelBootEditor.nativeFlashBoot(tempImg.absolutePath) { line ->
                     coroutineScope.launch(Dispatchers.Main) {
                         consoleOutput = (consoleOutput ?: "") + line + "\n"
                     }
@@ -330,7 +248,7 @@ fun BootImageEditorScreen(onNavigateBack: () -> Unit = {}) {
                         canReboot = true
                         consoleOutput = (consoleOutput ?: "") + "\n\n--- Flashed Successfully! Please Reboot to activate ---"
                     } else {
-                        consoleOutput = (consoleOutput ?: "") + "\n\n--- Flash failed with exit code $exitCode ---"
+                        consoleOutput = (consoleOutput ?: "") + "\n\n--- Flash failed with code $exitCode ---"
                     }
                 }
             } finally {
