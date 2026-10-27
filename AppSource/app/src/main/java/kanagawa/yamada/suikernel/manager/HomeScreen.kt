@@ -114,7 +114,8 @@ data class KernelDisplayInfo(
 fun DashboardScreen(
     onNavigateToSettings: () -> Unit = {},
     onNavigateToRecomendedModules: () -> Unit = {},
-    onNavigateToTerminal: () -> Unit = {}
+    onNavigateToTerminal: () -> Unit = {},
+    onNavigateToBootImageEditor: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val wallpaperBitmap by WallpaperCache.bitmap
@@ -661,8 +662,6 @@ fun DashboardScreen(
                 }
             }
 
-
-
             Spacer(modifier = Modifier.height(12.dp))
 
             // SuiKernel Settings
@@ -734,7 +733,66 @@ fun DashboardScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "This added because The Dev needs to check",
+                            text = buildAnnotatedString {
+                                append("This added because ")
+                                withStyle(SpanStyle(color = Color(0xFF26C6DA))) {
+                                    append("The Dev ")
+                                }
+                                append("needs to ")
+                                withStyle(SpanStyle(color = Color(0xFFE05A67))) {
+                                    append("check")
+                                }
+                            },
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Light,
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_right_arrow),
+                        contentDescription = "Right Arrow",
+                        tint = TextSecondary,
+                        modifier = Modifier.height(16.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Boot Image Editor
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToBootImageEditor() },
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Boot Image Editor",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(color = Color(0xFF26C6DA))) {
+                                    append("Pull and Flash")
+                                }
+                                append(" Boot Partition ")
+                                withStyle(SpanStyle(color = Color(0xFFE05A67))) {
+                                    append("/")
+                                }
+                                withStyle(SpanStyle(color = Color(0xFFA1D477))) {
+                                    append("/ Anykernel Flasher")
+                                }
+                            },
                             fontFamily = GoogleSansFlex,
                             fontWeight = FontWeight.Light,
                             fontSize = 12.sp,
