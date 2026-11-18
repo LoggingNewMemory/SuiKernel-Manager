@@ -20,7 +20,7 @@ package kana.wesley.yamada.suikernel.manager
 
 data class SuiKernelConfig(
     val anyaThermal: Boolean = true,
-    val yamadaBoost: Boolean = true,
+    val kanaBoost: Boolean = true,
     val performanceMode: String = "Balanced",
     val inahoAudio: Boolean = true,
     val tenebrion: Boolean = true,
@@ -29,7 +29,9 @@ data class SuiKernelConfig(
     val moonaZram: Boolean = true,
     val sparxieEnabled: Boolean = true,
     val sparxieSwap: Float = 30f
-)
+) {
+    val yamadaBoost: Boolean get() = kanaBoost
+}
 
 data class InstalledModuleInfo(
     val id: String,
@@ -131,9 +133,12 @@ object SuiKernelIoctl {
     private val ioExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     const val CMD_ANYA_THERMAL = 0x392C8989L
-    const val CMD_YAMADA_TOUCH_BOOST_DISABLE = 0x7A1F2C3BL
-    const val CMD_YAMADA_TOUCH_BOOST_BALANCED = 0x5C3E8A1DL
-    const val CMD_YAMADA_TOUCH_BOOST_GAMING = 0x3B9C4E2FL
+    const val CMD_KANA_TOUCH_BOOST_DISABLE = 0x7A1F2C3BL
+    const val CMD_KANA_TOUCH_BOOST_BALANCED = 0x5C3E8A1DL
+    const val CMD_KANA_TOUCH_BOOST_GAMING = 0x3B9C4E2FL
+    const val CMD_YAMADA_TOUCH_BOOST_DISABLE = CMD_KANA_TOUCH_BOOST_DISABLE
+    const val CMD_YAMADA_TOUCH_BOOST_BALANCED = CMD_KANA_TOUCH_BOOST_BALANCED
+    const val CMD_YAMADA_TOUCH_BOOST_GAMING = CMD_KANA_TOUCH_BOOST_GAMING
     const val CMD_INAHO_AUDIO = 0x1281817AL
     const val CMD_TENEBRION = 0x11EAF5CBL
     const val CMD_SPARXIE_SWAP = 0x1B3FB033L
@@ -252,7 +257,7 @@ object SuiKernelIoctl {
                     "1" -> "Balanced"
                     else -> cachedConfig.performanceMode
                 }
-                cachedConfig.copy(yamadaBoost = value != "0", performanceMode = mode)
+                cachedConfig.copy(kanaBoost = value != "0", performanceMode = mode)
             }
             "inaho" -> cachedConfig.copy(inahoAudio = value != "0")
             "tenebrion" -> cachedConfig.copy(tenebrion = value != "0")
@@ -285,7 +290,7 @@ object SuiKernelIoctl {
 
     private fun doWriteStorage(config: SuiKernelConfig) {
         val anyaVal = if (config.anyaThermal) "1" else "0"
-        val touchBoostVal = if (!config.yamadaBoost) "0" else if (config.performanceMode == "Gaming") "2" else "1"
+        val touchBoostVal = if (!config.kanaBoost) "0" else if (config.performanceMode == "Gaming") "2" else "1"
         val inahoVal = if (config.inahoAudio) "1" else "0"
         val tenebrionVal = if (config.tenebrion) "1" else "0"
         val airaniVal = if (config.airaniCpuset) "1" else "0"
@@ -366,12 +371,12 @@ object SuiKernelIoctl {
         // If files exist in /data/SuiKernel/, update state accurately from disk
         if (map.isNotEmpty()) {
             val touchBoost = map["touch_boost"]
-            val yamadaBoost = if (touchBoost != null) touchBoost != "0" else cachedConfig.yamadaBoost
+            val kanaBoost = if (touchBoost != null) touchBoost != "0" else cachedConfig.kanaBoost
             val performanceMode = if (touchBoost == "2") "Gaming" else if (touchBoost == "1") "Balanced" else cachedConfig.performanceMode
 
             val config = SuiKernelConfig(
                 anyaThermal = if (map.containsKey("anya_thermal")) map["anya_thermal"] != "0" else cachedConfig.anyaThermal,
-                yamadaBoost = yamadaBoost,
+                kanaBoost = kanaBoost,
                 performanceMode = performanceMode,
                 inahoAudio = if (map.containsKey("inaho")) map["inaho"] != "0" else cachedConfig.inahoAudio,
                 tenebrion = if (map.containsKey("tenebrion")) map["tenebrion"] != "0" else cachedConfig.tenebrion,
@@ -415,14 +420,14 @@ object SuiKernelIoctl {
         Thread {
             val config = readStorage()
             sendIoctl(CMD_ANYA_THERMAL, if (config.anyaThermal) 1L else 0L)
-            if (config.yamadaBoost) {
+            if (config.kanaBoost) {
                 if (config.performanceMode == "Gaming") {
-                    sendIoctl(CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
+                    sendIoctl(CMD_KANA_TOUCH_BOOST_GAMING, 1L)
                 } else {
-                    sendIoctl(CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
+                    sendIoctl(CMD_KANA_TOUCH_BOOST_BALANCED, 1L)
                 }
             } else {
-                sendIoctl(CMD_YAMADA_TOUCH_BOOST_DISABLE, 1L)
+                sendIoctl(CMD_KANA_TOUCH_BOOST_DISABLE, 1L)
             }
             sendIoctl(CMD_INAHO_AUDIO, if (config.inahoAudio) 1L else 0L)
             sendIoctl(CMD_TENEBRION, if (config.tenebrion) 1L else 0L)

@@ -64,7 +64,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
     var isLoaded by remember { mutableStateOf(SuiKernelIoctl.isLoaded) }
     val initialConfig = SuiKernelIoctl.cachedConfig
     var anyaThermal by remember { mutableStateOf(initialConfig.anyaThermal) }
-    var yamadaBoost by remember { mutableStateOf(initialConfig.yamadaBoost) }
+    var kanaBoost by remember { mutableStateOf(initialConfig.kanaBoost) }
     var performanceMode by remember { mutableStateOf(initialConfig.performanceMode) }
     
     var inahoAudio by remember { mutableStateOf(initialConfig.inahoAudio) }
@@ -80,7 +80,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             val config = SuiKernelIoctl.readStorage()
             withContext(Dispatchers.Main) {
                 anyaThermal = config.anyaThermal
-                yamadaBoost = config.yamadaBoost
+                kanaBoost = config.kanaBoost
                 performanceMode = config.performanceMode
                 inahoAudio = config.inahoAudio
                 tenebrion = config.tenebrion
@@ -181,7 +181,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Yamada Touch Boost Card
+            // Kana Touch Boost Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -189,22 +189,22 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     SettingToggleItem(
-                        title = "Yamada Touch Boost",
+                        title = "Kana Touch Boost",
                         subtitle = "Boosts CPU freq to max on touch",
-                        checked = yamadaBoost,
+                        checked = kanaBoost,
                         onCheckedChange = { 
                             try {
-                                yamadaBoost = it 
+                                kanaBoost = it 
                                 if (it) {
                                     if (performanceMode == "Gaming") {
-                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
+                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_KANA_TOUCH_BOOST_GAMING, 1L)
                                         SuiKernelIoctl.writeFeature("touch_boost", "2")
                                     } else {
-                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
+                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_KANA_TOUCH_BOOST_BALANCED, 1L)
                                         SuiKernelIoctl.writeFeature("touch_boost", "1")
                                     }
                                 } else {
-                                    SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_DISABLE, 1L)
+                                    SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_KANA_TOUCH_BOOST_DISABLE, 1L)
                                     SuiKernelIoctl.writeFeature("touch_boost", "0")
                                 }
                             } catch (e: Throwable) {
@@ -213,7 +213,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                         }
                     )
                     
-                    AnimatedVisibility(visible = yamadaBoost) {
+                    AnimatedVisibility(visible = kanaBoost) {
                         Column {
                             Spacer(modifier = Modifier.height(16.dp))
                             HorizontalDivider(color = Color.White, thickness = 1.dp)
@@ -224,7 +224,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                                 onClick = { 
                                     try {
                                         performanceMode = "Balanced" 
-                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_BALANCED, 1L)
+                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_KANA_TOUCH_BOOST_BALANCED, 1L)
                                         SuiKernelIoctl.writeFeature("touch_boost", "1")
                                     } catch (e: Throwable) {
                                         android.util.Log.e("SuiKernelSettings", "Error setting Balanced", e)
@@ -252,7 +252,7 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                                 onClick = { 
                                     try {
                                         performanceMode = "Gaming" 
-                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_YAMADA_TOUCH_BOOST_GAMING, 1L)
+                                        SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_KANA_TOUCH_BOOST_GAMING, 1L)
                                         SuiKernelIoctl.writeFeature("touch_boost", "2")
                                     } catch (e: Throwable) {
                                         android.util.Log.e("SuiKernelSettings", "Error setting Gaming", e)
