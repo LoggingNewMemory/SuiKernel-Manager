@@ -5,6 +5,7 @@ add_library(suikernel_ioctl SHARED
     SuiKernelIoctl.c
     SuiKernelBootEditor.c
     ModuleDetection.c
+    FindGovernor.c
 )
 
 target_link_libraries(suikernel_ioctl android log)

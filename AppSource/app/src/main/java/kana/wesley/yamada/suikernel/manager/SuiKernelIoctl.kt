@@ -28,7 +28,9 @@ data class SuiKernelConfig(
     val sandevistan: Boolean = true,
     val moonaZram: Boolean = true,
     val sparxieEnabled: Boolean = true,
-    val sparxieSwap: Float = 30f
+    val sparxieSwap: Float = 30f,
+    val govEnforcerEnabled: Boolean = true,
+    val enforcedGovernor: String = "schedutil"
 ) {
     val yamadaBoost: Boolean get() = kanaBoost
 }
@@ -70,10 +72,15 @@ object SuiKernelIoctl {
         sandevistan: String,
         moona: String,
         sparxie: String,
-        swappiness: String
+        swappiness: String,
+        govEnforcer: String,
+        governor: String
     ): Boolean
     external fun nativeReadStorage(): String?
     external fun nativeGetInstalledModules(): String?
+    external fun nativeGetAvailableGovernors(): String?
+    external fun nativeGetCurrentGovernor(): String?
+    external fun nativeSetGovernor(gov: String): Boolean
 
     fun sendIoctl(cmd: Long, arg: Long): Int {
         return try {
@@ -145,6 +152,7 @@ object SuiKernelIoctl {
     const val CMD_AIRANI_CPUSET = 0x2FC6501BL
     const val CMD_SANDEVISTAN = 0x27B55B18L
     const val CMD_MOONA_ZRAM = 0x3E8B1A4CL
+    const val CMD_GOV_ENFORCER = 0x474F5601L
     const val CMD_SUI_ELEVATE_ROOT = 0x53554901L
     const val SUI_ELEVATE_MAGIC = 0x4B414E4153550000L
 
@@ -266,6 +274,8 @@ object SuiKernelIoctl {
             "moona_zram" -> cachedConfig.copy(moonaZram = value != "0")
             "sparxie" -> cachedConfig.copy(sparxieEnabled = value != "0")
             "swappiness" -> cachedConfig.copy(sparxieSwap = value.toFloatOrNull()?.coerceIn(10f, 100f) ?: 30f)
+            "gov_enforcer" -> cachedConfig.copy(govEnforcerEnabled = value != "0")
+            "governor" -> cachedConfig.copy(enforcedGovernor = value.trim())
             else -> cachedConfig
         }
     }
@@ -298,6 +308,8 @@ object SuiKernelIoctl {
         val moonaVal = if (config.moonaZram) "1" else "0"
         val sparxieVal = if (config.sparxieEnabled) "1" else "0"
         val swappinessVal = if (config.sparxieEnabled) config.sparxieSwap.toInt().toString() else "30"
+        val govEnforcerVal = if (config.govEnforcerEnabled) "1" else "0"
+        val governorVal = if (config.enforcedGovernor.isNotBlank()) config.enforcedGovernor.trim() else "schedutil"
 
         var written = false
         if (isNativeRootSupported()) {
@@ -310,7 +322,9 @@ object SuiKernelIoctl {
                 sandevistan = sandevistanVal,
                 moona = moonaVal,
                 sparxie = sparxieVal,
-                swappiness = swappinessVal
+                swappiness = swappinessVal,
+                govEnforcer = govEnforcerVal,
+                governor = governorVal
             )
         }
 
@@ -326,6 +340,8 @@ object SuiKernelIoctl {
                     "echo -n $touchBoostVal > /data/SuiKernel/touch_boost && " +
                     "echo -n $tenebrionVal > /data/SuiKernel/tenebrion && " +
                     "echo -n $anyaVal > /data/SuiKernel/anya_thermal && " +
+                    "echo -n $govEnforcerVal > /data/SuiKernel/gov_enforcer && " +
+                    "echo -n $governorVal > /data/SuiKernel/governor && " +
                     "chmod 755 /data/SuiKernel && chmod 644 /data/SuiKernel/*"
 
             runCommand(cmd)
@@ -355,7 +371,7 @@ object SuiKernelIoctl {
         // 2. Fallback to shell command if direct C read returned empty
         if (map.isEmpty()) {
             try {
-                val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan moona_zram sparxie swappiness; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
+                val cmd = "for f in anya_thermal touch_boost inaho tenebrion airani sandevistan moona_zram sparxie swappiness gov_enforcer governor; do if [ -f /data/SuiKernel/\$f ]; then echo \"\$f=\$(cat /data/SuiKernel/\$f)\"; fi; done"
                 val lines = runCommandWithOutput(cmd)
                 lines.forEach { line ->
                     val parts = line.split("=", limit = 2)
@@ -384,7 +400,9 @@ object SuiKernelIoctl {
                 sandevistan = if (map.containsKey("sandevistan")) map["sandevistan"] == "1" else cachedConfig.sandevistan,
                 moonaZram = if (map.containsKey("moona_zram")) map["moona_zram"] != "0" else cachedConfig.moonaZram,
                 sparxieEnabled = if (map.containsKey("sparxie")) map["sparxie"] != "0" else cachedConfig.sparxieEnabled,
-                sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: cachedConfig.sparxieSwap
+                sparxieSwap = map["swappiness"]?.toFloatOrNull()?.coerceIn(10f, 100f) ?: cachedConfig.sparxieSwap,
+                govEnforcerEnabled = if (map.containsKey("gov_enforcer")) map["gov_enforcer"] != "0" else cachedConfig.govEnforcerEnabled,
+                enforcedGovernor = map["governor"]?.trim()?.ifBlank { null } ?: cachedConfig.enforcedGovernor
             )
             cachedConfig = config
             isLoaded = true
@@ -439,7 +457,40 @@ object SuiKernelIoctl {
             } else {
                 sendIoctl(CMD_SPARXIE_SWAP, 30L)
             }
+            sendIoctl(CMD_GOV_ENFORCER, if (config.govEnforcerEnabled) 1L else 0L)
+            if (config.govEnforcerEnabled && config.enforcedGovernor.isNotBlank()) {
+                applyGovernor(config.enforcedGovernor)
+            }
         }.start()
+    }
+
+    fun applyGovernor(gov: String) {
+        val cleanGov = gov.trim()
+        if (cleanGov.isEmpty()) return
+        ioExecutor.execute {
+            try {
+                nativeSetGovernor(cleanGov)
+            } catch (e: Throwable) {
+                android.util.Log.e("SuiKernelIoctl", "Error setting governor $cleanGov", e)
+            }
+        }
+    }
+
+    fun getAvailableGovernors(): List<String> {
+        val raw = try {
+            nativeGetAvailableGovernors()
+        } catch (e: Throwable) {
+            null
+        }
+        return raw?.trim()?.split("\\s+".toRegex())?.filter { it.isNotBlank() } ?: emptyList()
+    }
+
+    fun getCurrentGovernor(): String? {
+        return try {
+            nativeGetCurrentGovernor()
+        } catch (e: Throwable) {
+            null
+        }
     }
 
     fun parseModuleDump(raw: String): List<InstalledModuleInfo> {

@@ -251,7 +251,8 @@ JNIEXPORT jboolean JNICALL
 Java_kana_wesley_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
     JNIEnv *env, jobject thiz,
     jstring anya, jstring touch_boost, jstring inaho, jstring tenebrion,
-    jstring airani, jstring sandevistan, jstring moona, jstring sparxie, jstring swappiness) {
+    jstring airani, jstring sandevistan, jstring moona, jstring sparxie, jstring swappiness,
+    jstring gov_enforcer, jstring governor) {
 
     const char *c_anya = anya ? (*env)->GetStringUTFChars(env, anya, NULL) : "1";
     const char *c_touch = touch_boost ? (*env)->GetStringUTFChars(env, touch_boost, NULL) : "1";
@@ -262,16 +263,18 @@ Java_kana_wesley_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
     const char *c_moona = moona ? (*env)->GetStringUTFChars(env, moona, NULL) : "1";
     const char *c_sparxie = sparxie ? (*env)->GetStringUTFChars(env, sparxie, NULL) : "1";
     const char *c_swappiness = swappiness ? (*env)->GetStringUTFChars(env, swappiness, NULL) : "30";
+    const char *c_gov_enforcer = gov_enforcer ? (*env)->GetStringUTFChars(env, gov_enforcer, NULL) : "1";
+    const char *c_governor = governor ? (*env)->GetStringUTFChars(env, governor, NULL) : "schedutil";
 
     elevate_thread_if_needed();
     mkdir("/data/SuiKernel", 0755);
     chmod("/data/SuiKernel", 0755);
 
-    const char *files[] = {"anya_thermal", "touch_boost", "inaho", "tenebrion", "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"};
-    const char *vals[]  = {c_anya, c_touch, c_inaho, c_tenebrion, c_airani, c_sandevistan, c_moona, c_sparxie, c_swappiness};
+    const char *files[] = {"anya_thermal", "touch_boost", "inaho", "tenebrion", "airani", "sandevistan", "moona_zram", "sparxie", "swappiness", "gov_enforcer", "governor"};
+    const char *vals[]  = {c_anya, c_touch, c_inaho, c_tenebrion, c_airani, c_sandevistan, c_moona, c_sparxie, c_swappiness, c_gov_enforcer, c_governor};
 
     int direct_ok = 1;
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 11; i++) {
         char path[256];
         snprintf(path, sizeof(path), "/data/SuiKernel/%s", files[i]);
         int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -294,6 +297,8 @@ Java_kana_wesley_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
     if (moona) (*env)->ReleaseStringUTFChars(env, moona, c_moona);
     if (sparxie) (*env)->ReleaseStringUTFChars(env, sparxie, c_sparxie);
     if (swappiness) (*env)->ReleaseStringUTFChars(env, swappiness, c_swappiness);
+    if (gov_enforcer) (*env)->ReleaseStringUTFChars(env, gov_enforcer, c_gov_enforcer);
+    if (governor) (*env)->ReleaseStringUTFChars(env, governor, c_governor);
 
     return direct_ok ? JNI_TRUE : JNI_FALSE;
 }
@@ -302,11 +307,11 @@ Java_kana_wesley_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
 JNIEXPORT jstring JNICALL
 Java_kana_wesley_yamada_suikernel_manager_SuiKernelIoctl_nativeReadStorage(JNIEnv *env, jobject thiz) {
     elevate_thread_if_needed();
-    const char *files[] = {"anya_thermal", "touch_boost", "inaho", "tenebrion", "airani", "sandevistan", "moona_zram", "sparxie", "swappiness"};
+    const char *files[] = {"anya_thermal", "touch_boost", "inaho", "tenebrion", "airani", "sandevistan", "moona_zram", "sparxie", "swappiness", "gov_enforcer", "governor"};
     char buf[2048] = {0};
     int found_any = 0;
 
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 11; i++) {
         char path[256];
         snprintf(path, sizeof(path), "/data/SuiKernel/%s", files[i]);
         int fd = open(path, O_RDONLY);

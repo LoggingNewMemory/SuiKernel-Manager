@@ -74,10 +74,15 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
     var moonaZram by remember { mutableStateOf(initialConfig.moonaZram) }
     var sparxieSwap by remember { mutableStateOf(initialConfig.sparxieSwap) }
     var sparxieEnabled by remember { mutableStateOf(initialConfig.sparxieEnabled) }
+    var govEnforcerEnabled by remember { mutableStateOf(initialConfig.govEnforcerEnabled) }
+    var enforcedGovernor by remember { mutableStateOf(initialConfig.enforcedGovernor) }
+    var availableGovernors by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             val config = SuiKernelIoctl.readStorage()
+            val govs = SuiKernelIoctl.getAvailableGovernors()
+            val curGov = SuiKernelIoctl.getCurrentGovernor()
             withContext(Dispatchers.Main) {
                 anyaThermal = config.anyaThermal
                 kanaBoost = config.kanaBoost
@@ -89,6 +94,9 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                 moonaZram = config.moonaZram
                 sparxieEnabled = config.sparxieEnabled
                 sparxieSwap = config.sparxieSwap
+                govEnforcerEnabled = config.govEnforcerEnabled
+                enforcedGovernor = config.enforcedGovernor.ifBlank { curGov ?: "schedutil" }
+                availableGovernors = govs
                 isLoaded = true
             }
         }
@@ -464,6 +472,84 @@ fun SuiKernelSettingsScreen(onNavigateBack: () -> Unit = {}) {
                                     inactiveTrackColor = Color.DarkGray
                                 )
                             )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Governor Enforcer Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardDark)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    SettingToggleItem(
+                        title = "Governor Enforcer",
+                        subtitle = if (govEnforcerEnabled) "Enforce CPU governor ($enforcedGovernor)" else "Enforce user predefined CPU governor",
+                        checked = govEnforcerEnabled,
+                        onCheckedChange = { 
+                            try {
+                                govEnforcerEnabled = it
+                                SuiKernelIoctl.sendIoctl(SuiKernelIoctl.CMD_GOV_ENFORCER, if (it) 1L else 0L)
+                                SuiKernelIoctl.writeFeature("gov_enforcer", if (it) "1" else "0")
+                                if (it && enforcedGovernor.isNotBlank()) {
+                                    SuiKernelIoctl.applyGovernor(enforcedGovernor)
+                                }
+                                showRebootToast()
+                            } catch (e: Throwable) {
+                                android.util.Log.e("SuiKernelSettings", "Error toggling Governor Enforcer", e)
+                            }
+                        }
+                    )
+
+                    AnimatedVisibility(visible = govEnforcerEnabled) {
+                        Column {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            HorizontalDivider(color = Color.White, thickness = 1.dp)
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "Select Target Governor",
+                                fontFamily = GoogleSansFlex,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp,
+                                color = Color(0xFF9E9E9E)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            availableGovernors.forEach { gov ->
+                                val isSelected = enforcedGovernor.equals(gov, ignoreCase = true)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Button(
+                                    onClick = { 
+                                        try {
+                                            enforcedGovernor = gov
+                                            SuiKernelIoctl.writeFeature("governor", gov)
+                                            SuiKernelIoctl.applyGovernor(gov)
+                                            showRebootToast()
+                                        } catch (e: Throwable) {
+                                            android.util.Log.e("SuiKernelSettings", "Error setting governor $gov", e)
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isSelected) Color(0xFF00ACC1) else Color(0xFF1C2830)
+                                    )
+                                ) {
+                                    Text(
+                                        text = gov,
+                                        fontFamily = GoogleSansFlex,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 16.sp,
+                                        color = Color.White
+                                    )
+                                }
+                            }
                         }
                     }
                 }
