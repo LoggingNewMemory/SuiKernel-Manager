@@ -31,6 +31,17 @@ data class SuiKernelConfig(
     val sparxieSwap: Float = 30f
 )
 
+data class InstalledModuleInfo(
+    val id: String,
+    val name: String,
+    val version: String = "",
+    val versionCode: Int = 0,
+    val author: String = "",
+    val description: String = "",
+    val enabled: Boolean = true,
+    val remove: Boolean = false
+)
+
 object SuiKernelIoctl {
     init {
         try {
@@ -60,6 +71,7 @@ object SuiKernelIoctl {
         swappiness: String
     ): Boolean
     external fun nativeReadStorage(): String?
+    external fun nativeGetInstalledModules(): String?
 
     fun sendIoctl(cmd: Long, arg: Long): Int {
         return try {
@@ -423,5 +435,63 @@ object SuiKernelIoctl {
                 sendIoctl(CMD_SPARXIE_SWAP, 30L)
             }
         }.start()
+    }
+
+    fun parseModuleDump(raw: String): List<InstalledModuleInfo> {
+        val modules = mutableListOf<InstalledModuleInfo>()
+        val blocks = raw.split("[MODULE]").map { it.trim() }.filter { it.isNotEmpty() }
+        for (block in blocks) {
+            var dirName = ""
+            var disabled = false
+            var remove = false
+            val props = mutableMapOf<String, String>()
+
+            block.lines().forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
+                val eqIdx = trimmed.indexOf('=')
+                if (eqIdx != -1) {
+                    val key = trimmed.substring(0, eqIdx).trim()
+                    val value = trimmed.substring(eqIdx + 1).trim()
+                    when (key) {
+                        "dir" -> dirName = value
+                        "disabled" -> disabled = (value == "1" || value.equals("true", ignoreCase = true))
+                        "remove" -> remove = (value == "1" || value.equals("true", ignoreCase = true))
+                        else -> props[key] = value
+                    }
+                }
+            }
+
+            val id = props["id"]?.ifBlank { null } ?: dirName
+            if (id.isNotEmpty()) {
+                modules.add(
+                    InstalledModuleInfo(
+                        id = id,
+                        name = props["name"]?.ifBlank { null } ?: id,
+                        version = props["version"] ?: "",
+                        versionCode = props["versionCode"]?.toIntOrNull() ?: 0,
+                        author = props["author"] ?: "",
+                        description = props["description"] ?: "",
+                        enabled = !disabled,
+                        remove = remove
+                    )
+                )
+            }
+        }
+        return modules
+    }
+
+    fun getInstalledModules(): List<InstalledModuleInfo> {
+        return try {
+            val raw = nativeGetInstalledModules()
+            if (!raw.isNullOrBlank()) {
+                parseModuleDump(raw)
+            } else {
+                emptyList()
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("SuiKernelIoctl", "nativeGetInstalledModules failed", e)
+            emptyList()
+        }
     }
 }

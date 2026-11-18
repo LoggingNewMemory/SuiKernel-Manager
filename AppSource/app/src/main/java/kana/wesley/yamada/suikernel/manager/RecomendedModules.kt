@@ -42,6 +42,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kana.wesley.yamada.suikernel.manager.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class HostPlatform {
     GITHUB,
@@ -52,8 +55,44 @@ data class RecomendedModuleItem(
     val title: String,
     val author: String,
     val repo: String,
-    val platform: HostPlatform = HostPlatform.GITHUB
+    val platform: HostPlatform = HostPlatform.GITHUB,
+    val candidateIds: List<String> = emptyList()
 )
+
+fun findInstalledModule(
+    item: RecomendedModuleItem,
+    installedList: List<InstalledModuleInfo>
+): InstalledModuleInfo? {
+    // 1. Direct match with explicit candidateIds
+    for (candidate in item.candidateIds) {
+        val found = installedList.firstOrNull { it.id.equals(candidate, ignoreCase = true) }
+        if (found != null) return found
+    }
+
+    // 2. Match with repo name (e.g. BRENE -> brene)
+    val repoName = item.repo.substringAfter("/").trim()
+    val repoClean = repoName.replace("-", "").replace("_", "").lowercase()
+    val foundByRepo = installedList.firstOrNull {
+        val idClean = it.id.replace("-", "").replace("_", "").lowercase()
+        idClean == repoClean || it.id.equals(repoName, ignoreCase = true)
+    }
+    if (foundByRepo != null) return foundByRepo
+
+    // 3. Match normalized title
+    val titleClean = item.title.replace(" ", "").replace("-", "").lowercase()
+    val foundByTitle = installedList.firstOrNull {
+        val idClean = it.id.replace("-", "").replace("_", "").lowercase()
+        val nameClean = it.name.replace(" ", "").replace("-", "").lowercase()
+        idClean == titleClean || nameClean == titleClean
+    }
+    if (foundByTitle != null) return foundByTitle
+
+    // 4. Fuzzy fallback match on name
+    return installedList.firstOrNull {
+        it.name.contains(item.title, ignoreCase = true) ||
+        (item.candidateIds.isNotEmpty() && item.candidateIds.any { cand -> it.name.contains(cand, ignoreCase = true) })
+    }
+}
 
 @Composable
 fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
@@ -61,6 +100,7 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
     val scrollState = rememberScrollState()
 
     var isVanillaKernel by remember { mutableStateOf(false) }
+    var installedModules by remember { mutableStateOf<List<InstalledModuleInfo>>(emptyList()) }
 
     val allModules = remember {
         listOf(
@@ -68,50 +108,64 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
                 title = "Brene SUSFS",
                 author = "rrr333nnn333",
                 repo = "rrr333nnn333/BRENE",
-                platform = HostPlatform.GITHUB
+                platform = HostPlatform.GITHUB,
+                candidateIds = listOf("brene", "BRENE", "brene_susfs", "susfs", "susfs4ksu", "ksu_susfs")
             ),
             RecomendedModuleItem(
                 title = "BreZygisk",
                 author = "rrr333nnn333",
                 repo = "rrr333nnn333/BreZygisk",
-                platform = HostPlatform.GITHUB
+                platform = HostPlatform.GITHUB,
+                candidateIds = listOf("brezygisk", "bre_zygisk", "rezygisk")
             ),
             RecomendedModuleItem(
                 title = "BreWheel",
                 author = "rrr333nnn333",
                 repo = "rrr333nnn333/BreWheel",
-                platform = HostPlatform.GITHUB
+                platform = HostPlatform.GITHUB,
+                candidateIds = listOf("brewheel", "bre_wheel", "treat_wheel", "treatwheel")
             ),
             RecomendedModuleItem(
                 title = "Vector",
                 author = "JingMatrix",
                 repo = "JingMatrix/Vector",
-                platform = HostPlatform.GITHUB
+                platform = HostPlatform.GITHUB,
+                candidateIds = listOf("zygisk_vector", "vector", "lsposed")
             ),
             RecomendedModuleItem(
                 title = "HMA OSS",
                 author = "frknkrc44",
                 repo = "frknkrc44/HMA-OSS",
-                platform = HostPlatform.GITHUB
+                platform = HostPlatform.GITHUB,
+                candidateIds = listOf("hma_oss_zygisk", "hma_oss", "hma", "hide_my_applist", "hidemyapplist")
             ),
             RecomendedModuleItem(
                 title = "Always Strong",
                 author = "Evokerr",
                 repo = "Evokerr/AlwaysStrong",
-                platform = HostPlatform.GITLAB
+                platform = HostPlatform.GITLAB,
+                candidateIds = listOf("alwaysstrong", "always_strong", "playintegrityfork")
             ),
             RecomendedModuleItem(
                 title = "NoMount",
                 author = "maxsteeel",
                 repo = "maxsteeel/nomount",
-                platform = HostPlatform.GITHUB
+                platform = HostPlatform.GITHUB,
+                candidateIds = listOf("nomount", "no_mount")
             )
         )
     }
 
     LaunchedEffect(Unit) {
-        val versionStr = SuiKernelIoctl.readProcVersion() ?: ""
-        isVanillaKernel = versionStr.contains("Vanilla", ignoreCase = true)
+        withContext(Dispatchers.IO) {
+            val versionStr = SuiKernelIoctl.readProcVersion() ?: ""
+            val isVanilla = versionStr.contains("Vanilla", ignoreCase = true)
+            val modules = SuiKernelIoctl.getInstalledModules()
+            withContext(Dispatchers.Main) {
+                isVanillaKernel = isVanilla
+                installedModules = modules
+            }
+        }
     }
 
     val displayModules = remember(isVanillaKernel) {
@@ -187,8 +241,10 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             displayModules.forEach { module ->
+                val installedInfo = findInstalledModule(module, installedModules)
                 ModuleRowItem(
                     module = module,
+                    installedInfo = installedInfo,
                     onClick = { openModuleLink(module) }
                 )
             }
@@ -201,8 +257,11 @@ fun RecomendedModulesScreen(onNavigateBack: () -> Unit = {}) {
 @Composable
 fun ModuleRowItem(
     module: RecomendedModuleItem,
+    installedInfo: InstalledModuleInfo? = null,
     onClick: () -> Unit
 ) {
+    val isInstalled = installedInfo != null
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -211,23 +270,69 @@ fun ModuleRowItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = module.title,
-                fontFamily = GoogleSansFlex,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                color = Color.White
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = module.title,
+                    fontFamily = GoogleSansFlex,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = Color.White
+                )
+
+                if (isInstalled) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_ok),
+                        contentDescription = "Installed",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            Text(
-                text = "By: ${module.author}",
-                fontFamily = GoogleSansFlex,
-                fontWeight = FontWeight.Normal,
-                fontSize = 12.sp,
-                color = Color(0xFF9E9E9E)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "By: ${module.author}",
+                    fontFamily = GoogleSansFlex,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 12.sp,
+                    color = Color(0xFF9E9E9E)
+                )
+
+                if (isInstalled) {
+                    Text(
+                        text = "•",
+                        fontFamily = GoogleSansFlex,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 12.sp,
+                        color = Color(0xFF6B7280)
+                    )
+                    val versionText = installedInfo?.version?.takeIf { it.isNotBlank() }
+                    Text(
+                        text = if (versionText != null) "Installed ($versionText)" else "Installed",
+                        fontFamily = GoogleSansFlex,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp,
+                        color = Color(0xFFA1D477)
+                    )
+                    if (installedInfo?.enabled == false) {
+                        Text(
+                            text = "(Disabled)",
+                            fontFamily = GoogleSansFlex,
+                            fontWeight = FontWeight.Normal,
+                            fontSize = 11.sp,
+                            color = Color(0xFFE05A67)
+                        )
+                    }
+                }
+            }
         }
 
         IconButton(
