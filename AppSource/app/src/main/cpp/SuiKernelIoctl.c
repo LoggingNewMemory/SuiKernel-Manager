@@ -258,7 +258,7 @@ Java_kana_wesley_yamada_suikernel_manager_SuiKernelIoctl_nativeWriteStorage(
     const char *c_inaho = inaho ? (*env)->GetStringUTFChars(env, inaho, NULL) : "1";
     const char *c_tenebrion = tenebrion ? (*env)->GetStringUTFChars(env, tenebrion, NULL) : "1";
     const char *c_airani = airani ? (*env)->GetStringUTFChars(env, airani, NULL) : "1";
-    const char *c_sandevistan = sandevistan ? (*env)->GetStringUTFChars(env, sandevistan, NULL) : "0";
+    const char *c_sandevistan = sandevistan ? (*env)->GetStringUTFChars(env, sandevistan, NULL) : "1";
     const char *c_moona = moona ? (*env)->GetStringUTFChars(env, moona, NULL) : "1";
     const char *c_sparxie = sparxie ? (*env)->GetStringUTFChars(env, sparxie, NULL) : "1";
     const char *c_swappiness = swappiness ? (*env)->GetStringUTFChars(env, swappiness, NULL) : "30";

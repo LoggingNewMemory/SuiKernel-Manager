@@ -25,7 +25,7 @@ data class SuiKernelConfig(
     val inahoAudio: Boolean = true,
     val tenebrion: Boolean = true,
     val airaniCpuset: Boolean = true,
-    val sandevistan: Boolean = false,
+    val sandevistan: Boolean = true,
     val moonaZram: Boolean = true,
     val sparxieEnabled: Boolean = true,
     val sparxieSwap: Float = 30f
